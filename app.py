@@ -3,75 +3,96 @@ from openai import OpenAI
 from PyPDF2 import PdfReader
 import io
 
-# Configurazione Pagina
-st.set_page_config(page_title="AI Podcast Generator", page_icon="🎙️")
-st.title("🎙️ PDF to Podcast Generator")
-st.subheader("Trasforma i tuoi documenti in audio multilingua")
+# --- CONFIGURAZIONE ---
+# Inserisci qui la tua API Key
+OPENAI_API_KEY = "IL_TUO_CODICE_API_QUI_OPENAI" 
 
-# Inserimento API Key (Sicurezza)
-api_key = st.sidebar.text_input("Inserisci la tua OpenAI API Key", type="password")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-if api_key:
-    client = OpenAI(api_key=api_key)
-else:
-    st.warning("Per favore, inserisci la tua OpenAI API Key nella barra laterale.")
-    st.stop()
+st.set_page_config(page_title="AI Podcast Pro", page_icon="🎙️")
+st.title("🎙️ PDF to Podcast Generator (Long Version)")
 
-# Selezione Lingua
-language = st.selectbox("In quale lingua vuoi il podcast?", 
-                        ["Italiano", "English", "Español", "Français", "Deutsch"])
+# Selezione Lingua e Voce
+col1, col2 = st.columns(2)
+with col1:
+    language = st.selectbox("Lingua Podcast", ["Italiano", "English", "Español", "Français", "Deutsch"])
+with col2:
+    voice = st.selectbox("Voce IA", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
 
-# Selezione Voce
-voice = st.selectbox("Scegli la voce dell'IA", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
+# Funzione per dividere il testo in blocchi
+def split_text(text, max_chars=3000):
+    chunks = []
+    while len(text) > max_chars:
+        # Trova l'ultimo spazio utile per non tagliare una parola a metà
+        split_index = text.rfind(' ', 0, max_chars)
+        if split_index == -1: split_index = max_chars
+        chunks.append(text[:split_index])
+        text = text[split_index:].strip()
+    chunks.append(text)
+    return chunks
 
-# Caricamento PDF
-uploaded_file = st.file_uploader("Carica il tuo file PDF", type="pdf")
+uploaded_file = st.file_uploader("Carica il PDF", type="pdf")
 
 if uploaded_file is not None:
-    if st.button("Genera Podcast"):
-        with st.spinner("Estrazione testo e generazione audio in corso..."):
+    if st.button("Genera Podcast Completo"):
+        # 1. Lettura PDF
+        reader = PdfReader(uploaded_file)
+        full_text = ""
+        for page in reader.pages:
+            content = page.extract_text()
+            if content:
+                full_text += content + " "
+        
+        # 2. Divisione in capitoli/blocchi
+        text_chunks = split_text(full_text)
+        st.info(f"Il documento è stato diviso in {len(text_chunks)} parti per l'elaborazione.")
+        
+        combined_audio_bytes = b"" # Buffer per unire l'audio
+        
+        progress_bar = st.progress(0)
+        
+        for i, chunk in enumerate(text_chunks):
+            st.write(f"Elaborazione parte {i+1} di {len(text_chunks)}...")
             
-            # 1. Estrazione Testo
-            reader = PdfReader(uploaded_file)
-            raw_text = ""
-            for page in reader.pages:
-                raw_text += page.extract_text()
-            
-            # Limitiamo il testo per non consumare troppi token in un colpo solo (opzionale)
-            input_text = raw_text[:4000] 
-
-            # 2. Traduzione e Adattamento (Prompt)
+            # 3. Traduzione e Adattamento Podcast via GPT
             prompt = f"""
-            Agisci come un podcaster professionista. Traduci e rielabora il seguente testo in {language}.
-            Rendilo scorrevole, colloquiale e adatto ad essere ascoltato. 
-            Testo: {input_text}
+            Sei un autore di podcast. Traduci e rielabora questo testo in {language}. 
+            Rendilo parlato, elimina riferimenti a tabelle o numeri di pagina. 
+            Deve sembrare un discorso fluido.
+            Testo: {chunk}
             """
             
-            response = client.chat.completions.create(
+            chat_response = client.chat.completions.create(
                 model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "system", "content": "Sei un esperto podcaster."},
+                          {"role": "user", "content": prompt}]
             )
-            podcast_script = response.choices[0].message.content
-
-            # 3. Generazione Audio (TTS)
+            script_chunk = chat_response.choices[0].message.content
+            
+            # 4. Generazione Audio (TTS)
+            # Nota: OpenAI TTS ha un limite di 4096 caratteri per richiesta
             audio_response = client.audio.speech.create(
                 model="tts-1",
                 voice=voice,
-                input=podcast_script
+                input=script_chunk
             )
             
-            # Salvataggio in un buffer per lo streaming
-            audio_data = io.BytesIO(audio_response.content)
+            # Aggiungiamo i bytes di questa parte al file finale
+            combined_audio_bytes += audio_response.content
+            
+            # Aggiorna progresso
+            progress_bar.progress((i + 1) / len(text_chunks))
 
-            st.success("Podcast generato con successo!")
-            
-            # Player Audio
-            st.audio(audio_data, format="audio/mp3")
-            
-            # Download button
-            st.download_button(
-                label="Scarica Podcast (MP3)",
-                data=audio_response.content,
-                file_name="podcast.mp3",
-                mime="audio/mp3"
-            )
+        # Risultato Finale
+        st.success("Tutte le parti sono state elaborate e unite!")
+        
+        # Player unico
+        st.audio(combined_audio_bytes, format="audio/mp3")
+        
+        # Download unico
+        st.download_button(
+            label="Scarica Podcast Completo (MP3)",
+            data=combined_audio_bytes,
+            file_name="podcast_completo.mp3",
+            mime="audio/mp3"
+        )
