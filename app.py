@@ -4,8 +4,6 @@ from PyPDF2 import PdfReader
 import io
 
 # --- 1. CONFIGURAZIONE SICUREZZA ---
-# Il codice cerca la chiave nei "Secrets" di Streamlit Cloud. 
-# NON incollare la chiave qui dentro se vuoi che funzioni su GitHub.
 if "OPENAI_API_KEY" in st.secrets:
     api_key = st.secrets["OPENAI_API_KEY"]
 else:
@@ -17,10 +15,23 @@ client = OpenAI(api_key=api_key)
 # --- 2. CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="AI Podcast Factory", page_icon="🎙️", layout="wide")
 
+# CSS personalizzato per nascondere il menu, il footer e stilizzare l'app
 st.markdown("""
     <style>
+    /* Nasconde il menu in alto a destra e il footer 'Made with Streamlit' */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
     .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #FF4B4B; color: white; }
+    .stButton>button { 
+        width: 100%; 
+        border-radius: 5px; 
+        height: 3em; 
+        background-color: #FF4B4B; 
+        color: white; 
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -42,7 +53,6 @@ def get_text_chunks(text, chunk_size=3500):
         if len(text) <= chunk_size:
             chunks.append(text)
             break
-        # Cerca l'ultimo punto per non tagliare le frasi a metà
         stop_index = text.rfind('.', 0, chunk_size)
         if stop_index == -1: stop_index = chunk_size
         chunks.append(text[:stop_index + 1])
@@ -117,9 +127,9 @@ if uploaded_file is not None:
             # Player Audio
             st.audio(final_audio, format="audio/mp3")
             
-            # Bottone di Download
+            # Bottone di Download (Sempre visibile dopo la generazione)
             st.download_button(
-                label="📥 Scarica Podcast (MP3)",
+                label="📥 SCARICA IL PODCAST (MP3)",
                 data=final_audio,
                 file_name="mio_podcast_ai.mp3",
                 mime="audio/mp3"
