@@ -2,139 +2,91 @@ import streamlit as st
 from openai import OpenAI
 from PyPDF2 import PdfReader
 import io
+from concurrent.futures import ThreadPoolExecutor # Per la velocità
 
 # --- 1. CONFIGURAZIONE SICUREZZA ---
 if "OPENAI_API_KEY" in st.secrets:
     api_key = st.secrets["OPENAI_API_KEY"]
 else:
-    st.error("⚠️ Chiave API non trovata! Vai nelle impostazioni di Streamlit Cloud (Settings > Secrets) e aggiungi OPENAI_API_KEY.")
+    st.error("⚠️ Chiave API non trovata nei Secrets!")
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
 # --- 2. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="AI Podcast Factory", page_icon="🎙️", layout="wide")
+st.set_page_config(page_title="AI Podcast Turbo", page_icon="⚡", layout="wide")
 
-# CSS personalizzato per nascondere il menu, il footer e stilizzare l'app
 st.markdown("""
     <style>
-    /* Nasconde il menu in alto a destra e il footer 'Made with Streamlit' */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    
-    .main { background-color: #f5f7f9; }
-    .stButton>button { 
-        width: 100%; 
-        border-radius: 5px; 
-        height: 3em; 
-        background-color: #FF4B4B; 
-        color: white; 
-        font-weight: bold;
-    }
+    .stButton>button { width: 100%; border-radius: 5px; background-color: #00CC66; color: white; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🎙️ AI di Antonino: Podcast Creator")
-st.write("Trasforma i tuoi PDF in podcast professionali multilingua.")
+st.title("⚡ AI Podcast Factory: Versione Turbo")
+st.write("Questa versione processa i capitoli in parallelo per risparmiare tempo.")
 
-# Sidebar per opzioni
-st.sidebar.header("Impostazioni Podcast")
-language = st.sidebar.selectbox("Lingua del Podcast", ["Italiano", "English", "Español", "Français", "Deutsch", "Português"])
-voice = st.sidebar.selectbox("Scegli la Voce IA", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
-st.sidebar.info("Nota: Le voci 'onyx' e 'echo' sono più maschili, 'nova' e 'shimmer' più femminili.")
+# Sidebar
+language = st.sidebar.selectbox("Lingua", ["Italiano", "English", "Español", "Français"])
+voice = st.sidebar.selectbox("Voce", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
 
-# --- 3. FUNZIONI TECNICHE ---
+# --- 3. FUNZIONE DI ELABORAZIONE SINGOLA PARTE ---
+def process_chunk(i, chunk, lang, v):
+    """Questa funzione gestisce una singola parte del podcast"""
+    # 1. Traduzione/Script (Uso gpt-4o-mini per velocità e risparmio)
+    prompt = f"Sei un podcaster. Adatta questo testo in {lang} in modo colloquiale: {chunk}"
+    
+    chat_response = client.chat.completions.create(
+        model="gpt-4o-mini", # Più veloce!
+        messages=[{"role": "user", "content": prompt}]
+    )
+    script = chat_response.choices[0].message.content
 
-def get_text_chunks(text, chunk_size=3500):
-    """Divide il testo in blocchi per non superare i limiti di OpenAI TTS e GPT."""
-    chunks = []
-    while len(text) > 0:
-        if len(text) <= chunk_size:
-            chunks.append(text)
-            break
-        stop_index = text.rfind('.', 0, chunk_size)
-        if stop_index == -1: stop_index = chunk_size
-        chunks.append(text[:stop_index + 1])
-        text = text[stop_index + 1:].strip()
-    return chunks
+    # 2. Sintesi Vocale
+    audio_response = client.audio.speech.create(
+        model="tts-1",
+        voice=v,
+        input=script
+    )
+    return i, audio_response.content
 
-# --- 4. INTERFACCIA DI CARICAMENTO ---
-uploaded_file = st.file_uploader("Carica il tuo file PDF", type="pdf")
+# --- 4. LOGICA PRINCIPALE ---
+uploaded_file = st.file_uploader("Carica il PDF", type="pdf")
 
 if uploaded_file is not None:
-    if st.button("🚀 GENERA PODCAST COMPLETO"):
+    if st.button("🚀 GENERA PODCAST TURBO"):
         try:
-            with st.status("Elaborazione in corso...", expanded=True) as status:
-                # A. Estrazione Testo
-                st.write("📖 Lettura del PDF...")
-                reader = PdfReader(uploaded_file)
-                full_text = ""
-                for page in reader.pages:
-                    content = page.extract_text()
-                    if content:
-                        full_text += content + " "
+            # A. Estrazione Testo
+            reader = PdfReader(uploaded_file)
+            text = " ".join([p.extract_text() for p in reader.pages if p.extract_text()])
+            
+            # B. Divisione in blocchi (aumentiamo un po' la dimensione per meno chiamate)
+            words = text.split()
+            chunk_size = 600 # Circa 600 parole per blocco
+            chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+            
+            st.info(f"Avvio elaborazione parallela di {len(chunks)} parti...")
+            progress_bar = st.progress(0)
+            
+            # C. ELABORAZIONE IN PARALLELO (Il segreto della velocità)
+            results = []
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Lanciamo tutte le richieste insieme
+                futures = [executor.submit(process_chunk, i, chunk, language, voice) for i, chunk in enumerate(chunks)]
                 
-                if not full_text.strip():
-                    st.error("Il PDF non contiene testo leggibile.")
-                    st.stop()
-
-                # B. Divisione in blocchi
-                chunks = get_text_chunks(full_text)
-                st.write(f"📦 Il testo è stato diviso in {len(chunks)} capitoli.")
-                
-                final_audio = b""
-                progress_bar = st.progress(0)
-
-                # C. Loop di elaborazione
-                for i, chunk in enumerate(chunks):
-                    st.write(f"⏳ Elaborazione parte {i+1} di {len(chunks)}...")
-                    
-                    # 1. Traduzione e Adattamento Podcast (GPT-4o)
-                    prompt = f"""
-                    Sei un conduttore di podcast esperto. Traduci e rielabora il seguente testo in {language}. 
-                    Rendilo colloquiale, coinvolgente e facile da ascoltare. 
-                    Elimina numeri di pagina, citazioni bibliografiche noiose o tabelle. 
-                    Parla direttamente all'ascoltatore.
-                    Testo da elaborare: {chunk}
-                    """
-                    
-                    chat_response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "Sei un autore di podcast di successo."},
-                            {"role": "user", "content": prompt}
-                        ]
-                    )
-                    podcast_script = chat_response.choices[0].message.content
-
-                    # 2. Generazione Audio (TTS)
-                    audio_response = client.audio.speech.create(
-                        model="tts-1",
-                        voice=voice,
-                        input=podcast_script
-                    )
-                    
-                    # Accumulo dei pezzi audio
-                    final_audio += audio_response.content
+                for i, future in enumerate(futures):
+                    results.append(future.result())
                     progress_bar.progress((i + 1) / len(chunks))
 
-                status.update(label="✅ Podcast Generato!", state="complete", expanded=False)
+            # D. Riordino (fondamentale perché il parallelo potrebbe finire in ordine sparso)
+            results.sort(key=lambda x: x[0])
+            final_audio = b"".join([r[1] for r in results])
 
-            # --- 5. RISULTATO FINALE ---
-            st.success("🎉 Il tuo podcast è pronto per l'ascolto!")
-            
-            # Player Audio
+            st.success("🎉 Podcast completato in tempo record!")
             st.audio(final_audio, format="audio/mp3")
-            
-            # Bottone di Download (Sempre visibile dopo la generazione)
-            st.download_button(
-                label="📥 SCARICA IL PODCAST (MP3)",
-                data=final_audio,
-                file_name="mio_podcast_ai.mp3",
-                mime="audio/mp3"
-            )
+            st.download_button("📥 SCARICA MP3", final_audio, "podcast_turbo.mp3", "audio/mp3")
 
         except Exception as e:
-            st.error(f"Si è verificato un errore: {e}")
-            st.info("Consiglio: Controlla che la tua API Key abbia credito sufficiente su OpenAI.")
+            st.error(f"Errore: {e}")
