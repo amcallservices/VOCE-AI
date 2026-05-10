@@ -8,82 +8,86 @@ from concurrent.futures import ThreadPoolExecutor
 if "OPENAI_API_KEY" in st.secrets:
     api_key = st.secrets["OPENAI_API_KEY"]
 else:
-    st.error("⚠️ Chiave API non trovata nei Secrets!")
+    st.error("⚠️ Chiave API non trovata! Vai in Settings > Secrets su Streamlit Cloud.")
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
-# --- 2. CONFIGURAZIONE PAGINA E CSS ---
+# --- 2. CONFIGURAZIONE LAYOUT ---
 st.set_page_config(page_title="AI Podcast Turbo", page_icon="⚡", layout="wide")
 
+# CSS per nascondere menu e rendere la sidebar più solida + STILE DARK PER COST-BOX
 st.markdown("""
     <style>
-    /* Nasconde menu e footer */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    
-    /* Sidebar fissa e pulita */
-    [data-testid="stSidebar"] {
-        min-width: 350px;
-        max-width: 350px;
-    }
-    
+    [data-testid="stSidebar"] { min-width: 350px; }
     .stButton>button { 
         width: 100%; 
-        border-radius: 5px; 
+        border-radius: 8px; 
         background-color: #00CC66; 
         color: white; 
         font-weight: bold; 
-        height: 3em;
+        height: 3.5em;
+        border: none;
     }
-    
     .cost-box { 
-        padding: 15px; 
+        padding: 20px; 
         border-radius: 10px; 
-        border: 1px solid #00CC66; 
-        background-color: #f0fff4; 
-        margin-bottom: 20px; 
+        border: 2px solid #00CC66; 
+        background-color: #1e1e1e; /* SFONDO DARK */
+        color: #ffffff; /* TESTO BIANCO */
+    }
+    .cost-box h4 {
+        color: #00CC66; /* Titolo in verde */
+        margin-top: 0;
     }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("⚡ AI Podcast Factory: Versione Turbo")
-st.write("Processa il testo in parallelo e traduci in varie lingue in tempo record.")
-
-# --- 3. SIDEBAR CON ANTEPRIME VOCI ---
-st.sidebar.header("🎙️ Configurazione Podcast")
-
-language = st.sidebar.selectbox("1. Lingua del Podcast", ["Italiano", "English", "Español", "Français", "Deutsch"])
-
-voice = st.sidebar.selectbox("2. Scegli la Voce IA", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
-
-# Esempi audio ufficiali OpenAI per far scegliere l'utente
-st.sidebar.write("🎵 Ascolta l'anteprima della voce:")
-voice_samples = {
-    "alloy": "https://cdn.openai.com/API/docs/audio/alloy.wav",
-    "echo": "https://cdn.openai.com/API/docs/audio/echo.wav",
-    "fable": "https://cdn.openai.com/API/docs/audio/fable.wav",
-    "onyx": "https://cdn.openai.com/API/docs/audio/onyx.wav",
-    "nova": "https://cdn.openai.com/API/docs/audio/nova.wav",
-    "shimmer": "https://cdn.openai.com/API/docs/audio/shimmer.wav"
-}
-st.sidebar.audio(voice_samples[voice], format="audio/wav")
-
-st.sidebar.divider()
-st.sidebar.info("Il programma analizzerà il PDF e calcolerà il costo prima di procedere.")
-
-# --- 4. FUNZIONE DI ELABORAZIONE ---
-def process_chunk(i, chunk, lang, v):
-    """Gestisce una singola parte del podcast"""
-    prompt = f"Sei un podcaster professionista. Traduci e adatta questo testo in {lang} in modo molto colloquiale e fluido: {chunk}"
+# --- 3. SIDEBAR FISSA CON ESEMPI VOCI ---
+with st.sidebar:
+    st.title("🎙️ Configurazione")
+    st.divider()
     
+    language = st.selectbox("🌍 Scegli la Lingua", 
+                            ["Italiano", "English", "Español", "Français", "Deutsch"])
+    
+    st.write("---")
+    
+    voice = st.selectbox("🗣️ Scegli la Voce", 
+                         ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
+    
+    # Anteprime Audio ufficiali OpenAI
+    st.write("🎵 Ascolta l'anteprima:")
+    voice_urls = {
+        "alloy": "https://cdn.openai.com/API/docs/audio/alloy.wav",
+        "echo": "https://cdn.openai.com/API/docs/audio/echo.wav",
+        "fable": "https://cdn.openai.com/API/docs/audio/fable.wav",
+        "onyx": "https://cdn.openai.com/API/docs/audio/onyx.wav",
+        "nova": "https://cdn.openai.com/API/docs/audio/nova.wav",
+        "shimmer": "https://cdn.openai.com/API/docs/audio/shimmer.wav"
+    }
+    st.audio(voice_urls[voice], format="audio/wav")
+    
+    st.divider()
+    st.info("Carica un PDF a destra per calcolare i costi.")
+
+# --- 4. FUNZIONE CORE (TURBO) ---
+def process_chunk(i, chunk, lang, v):
+    # Prompt per traduzione e adattamento
+    prompt = f"Sei un podcaster professionista. Traduci e adatta questo testo in {lang} in modo colloquiale: {chunk}"
+    
+    # 1. GPT-4o-mini (Economico e Veloce)
     chat_response = client.chat.completions.create(
-        model="gpt-4o-mini", 
-        messages=[{"role": "user", "content": prompt}]
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": "Sei un autore di podcast."},
+                  {"role": "user", "content": prompt}]
     )
     script = chat_response.choices[0].message.content
 
+    # 2. TTS (Sintesi Vocale)
     audio_response = client.audio.speech.create(
         model="tts-1",
         voice=v,
@@ -91,61 +95,69 @@ def process_chunk(i, chunk, lang, v):
     )
     return i, audio_response.content
 
-# --- 5. LOGICA PRINCIPALE ---
-uploaded_file = st.file_uploader("Carica il tuo PDF qui", type="pdf")
+# --- 5. INTERFACCIA PRINCIPALE ---
+st.title("⚡ AI di Antonino: Podcast Creator Turbo")
+st.write("Trasforma PDF lunghi in audio MP3 in pochi secondi.")
 
-if uploaded_file is not None:
-    # Lettura e analisi immediata
+uploaded_file = st.file_uploader("Trascina qui il tuo file PDF", type="pdf")
+
+if uploaded_file:
+    # Estrazione testo immediata per preventivo
     reader = PdfReader(uploaded_file)
-    text = " ".join([p.extract_text() for p in reader.pages if p.extract_text()])
-    char_count = len(text)
+    full_text = ""
+    for page in reader.pages:
+        t = page.extract_text()
+        if t: full_text += t + " "
     
-    # Calcolo preventivo costi
-    # TTS-1 = $0.015/1k char | GPT-4o-mini = trascurabile. Usiamo 0.016 per sicurezza.
-    estimated_cost = (char_count / 1000) * 0.016 
-
-    st.markdown(f"""
-        <div class="cost-box">
-            <h3>📊 Analisi Preventiva</h3>
-            <p>Caratteri totali nel PDF: <b>{char_count:,}</b></p>
-            <p>Costo stimato dell'operazione: <b>${estimated_cost:.4f} USD</b></p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    if st.button("🚀 CONFERMA E GENERA PODCAST"):
-        try:
-            # Divisione in blocchi
-            words = text.split()
-            chunk_size = 600 
-            chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-            
-            st.info(f"⚡ Turbo Mode attiva: Elaborazione di {len(chunks)} parti in parallelo...")
-            progress_bar = st.progress(0)
-            
-            results = []
-            # Utilizzo di 5 thread paralleli per massima velocità
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(process_chunk, i, chunk, language, voice) for i, chunk in enumerate(chunks)]
+    char_count = len(full_text)
+    
+    if char_count > 0:
+        # Calcolo costo approssimativo ($0.016 per 1000 char per coprire GPT+TTS)
+        costo_stimato = (char_count / 1000) * 0.016
+        
+        st.markdown(f"""
+            <div class="cost-box">
+                <h4>📊 Analisi Preventiva</h4>
+                <p>Testo rilevato: <b>{char_count:,} caratteri</b></p>
+                <p>Costo totale stimato: <b>${costo_stimato:.4f} USD</b></p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("🚀 GENERA IL PODCAST ORA"):
+            try:
+                # Divisione in blocchi da circa 3000 caratteri
+                words = full_text.split()
+                chunk_size = 500 # parole
+                chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
                 
-                for i, future in enumerate(futures):
-                    results.append(future.result())
-                    progress_bar.progress((i + 1) / len(chunks))
+                st.info(f"Elaborazione parallela di {len(chunks)} parti in corso...")
+                progress_bar = st.progress(0)
+                
+                results = []
+                # Multithreading per velocità Turbo
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(process_chunk, i, chunk, language, voice) for i, chunk in enumerate(chunks)]
+                    
+                    for i, future in enumerate(futures):
+                        results.append(future.result())
+                        progress_bar.progress((i + 1) / len(chunks))
 
-            # Riordino dei pezzi e unione
-            results.sort(key=lambda x: x[0])
-            final_audio = b"".join([r[1] for r in results])
+                # Riordino e unione dei file audio
+                results.sort(key=lambda x: x[0])
+                final_audio = b"".join([r[1] for r in results])
 
-            st.success("🎉 Podcast generato con successo!")
-            
-            # Anteprima e Download
-            st.audio(final_audio, format="audio/mp3")
-            
-            st.download_button(
-                label="📥 SCARICA IL PODCAST COMPLETO (MP3)", 
-                data=final_audio, 
-                file_name="podcast_antonino.mp3", 
-                mime="audio/mp3"
-            )
+                st.success("🎉 Podcast generato con successo!")
+                
+                # Player e Download
+                st.audio(final_audio, format="audio/mp3")
+                st.download_button(
+                    label="📥 SCARICA IL PODCAST (MP3)",
+                    data=final_audio,
+                    file_name="podcast_finale.mp3",
+                    mime="audio/mp3"
+                )
 
-        except Exception as e:
-            st.error(f"Errore durante la generazione: {e}")
+            except Exception as e:
+                st.error(f"Si è verificato un errore: {e}")
+    else:
+        st.warning("Il PDF caricato non contiene testo leggibile.")
