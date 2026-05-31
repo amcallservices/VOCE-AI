@@ -61,6 +61,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- FUNZIONE PER EVITARE UNICODEENCODEERROR IN FPDF ---
+def clean_text_for_latin1(text):
+    """Sostituisce i caratteri speciali Unicode non supportati da Latin-1 con varianti standard."""
+    if not text:
+        return ""
+    # Sostituzioni caratteri curvi/speciali frequenti nelle risposte delle AI
+    replacements = {
+        '\u2019': "'",  # Apostrofo curvo destro
+        '\u2018': "'",  # Apostrofo curvo sinistro
+        '\u201c': '"',  # Virgolette aperte curve
+        '\u201d': '"',  # Virgolette chiuse curve
+        '\u2013': '-',  # Trattino medio
+        '\u2014': '-',  # Trattino lungo
+        '\u2026': '...',# Puntini di sospensione unici
+        'à': 'a\'',     # Trasformiamo le accentate in lettere con apostrofo per sicurezza matematica su vecchi FPDF
+        'è': 'e\'',
+        'é': 'e\'',
+        'ì': 'i\'',
+        'ò': 'o\'',
+        'ù': 'u\''
+    }
+    for unicode_char, latin1_char in replacements.items():
+        text = text.replace(unicode_char, latin1_char)
+    
+    # Rimuove forzatamente qualsiasi altro carattere strano non encodabile in latin-1 (es. Emoji)
+    return text.encode('latin-1', 'ignore').decode('latin-1')
+
 # --- GESTIONE CHIAVI API ---
 if "OPENAI_API_KEY" in st.secrets:
     openai.api_key = st.secrets["OPENAI_API_KEY"]
@@ -106,7 +133,7 @@ generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO")
 # --- CLASSE CUSTOM FPDF ---
 class ComicPDF(FPDF):
     def __init__(self, orientation="P", unit="mm", format="A4"):
-        super().__init__(orientation, unit, format) # Inizializzazione corretta fpdf
+        super().__init__(orientation, unit, format)
         
     def header(self):
         pass
@@ -203,14 +230,12 @@ if generate_button:
                         )
                         image_url = str(output[0]) if isinstance(output, list) else str(output)
                         
-                        # --- FIX CONVERSIONE REALE WEBP -> PNG ---
+                        # Conversione reale WebP -> PNG
                         filename = f"temp_panel_{i}.png"
                         img_response = requests.get(image_url)
                         
                         if img_response.status_code == 200:
-                            # Apriamo l'immagine scaricata (WebP nativa di Replicate) con Pillow
                             image_webp = Image.open(BytesIO(img_response.content))
-                            # La salviamo forzatamente convertendola in un PNG REALE sul disco
                             image_webp.save(filename, "PNG")
                         else:
                             filename = None
@@ -240,7 +265,7 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE PDF CORRETTA ---
+                # --- COMPILAZIONE PDF STABILE ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
@@ -256,13 +281,14 @@ if generate_button:
                     pdf.set_y(100)
                     pdf.set_font("courier", "B", 32)
                     pdf.set_text_color(255, 255, 255)
-                    pdf.cell(0, 15, "SHADOW REQUIEM", align="C", ln=True)
+                    # Applichiamo la pulizia del testo anche al titolo di copertina
+                    pdf.cell(0, 15, clean_text_for_latin1("SHADOW REQUIEM"), align="C", ln=True)
                     
                     pdf.set_font("courier", "I", 14)
                     pdf.set_text_color(150, 150, 150)
-                    pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
+                    pdf.cell(0, 10, clean_text_for_latin1("A Comic AI Generated Book"), align="C", ln=True)
                     
-                    # 2. INSERIMENTO VIGNETTE CON IMMAGINI PNG CONVERTITE
+                    # 2. INSERIMENTO VIGNETTE
                     for idx, vig in enumerate(vignette_renderizzate):
                         if idx % 2 == 0:
                             pdf.add_page()
@@ -273,7 +299,6 @@ if generate_button:
                         if vig['local_path'] and os.path.exists(vig['local_path']):
                             try:
                                 current_y = pdf.get_y()
-                                # Ora 'local_path' contiene un PNG puro al 100%. FPDF non darà errori!
                                 pdf.image(vig['local_path'], x=20, y=current_y, w=170)
                                 
                                 pdf.set_y(current_y + 127.5)
@@ -290,13 +315,16 @@ if generate_button:
                                 pdf.set_text_color(255, 255, 255) 
                                 full_text = text_title + vig['dialogo'].upper()
                                 
-                                pdf.multi_cell(170, 6, full_text, border=1, align="L", fill=True)
+                                # CRUCIALE: Puliamo l'intera stringa prima di passarla al generatore PDF
+                                cleaned_pdf_text = clean_text_for_latin1(full_text)
+                                
+                                pdf.multi_cell(170, 6, cleaned_pdf_text, border=1, align="L", fill=True)
                                 pdf.set_y(pdf.get_y() + 12) 
                                 
                             except Exception as pdf_img_err:
                                 st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
                     
-                    # Otteniamo i byte del PDF
+                    # Generazione dell'output in formato stringa/bytes nativo di fpdf
                     pdf_bytes = pdf.output(dest='S')
                     
                     # Pulizia dei file temporanei PNG dal disco
@@ -304,7 +332,8 @@ if generate_button:
                         if vig['local_path'] and os.path.exists(vig['local_path']):
                             os.remove(vig['local_path'])
                 
-                # Bottone di Download attivato
+                # Bottone di Download attivato e funzionante
+                st.sidebar.markdown("---")
                 st.balloons()
                 st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
