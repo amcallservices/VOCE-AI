@@ -3,8 +3,10 @@ import openai
 import replicate
 import os
 import requests
+from io import BytesIO
+from PIL import Image
 
-# Forziamo l'uso di FPDF classico per la massima stabilità
+# Usiamo FPDF classico
 from fpdf import FPDF
 
 # Configurazione della pagina Streamlit (Deve essere il PRIMO comando Streamlit della pagina)
@@ -103,8 +105,12 @@ generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO")
 
 # --- CLASSE CUSTOM FPDF ---
 class ComicPDF(FPDF):
+    def __init__(self, orientation="P", unit="mm", format="A4"):
+        super().__init__(orientation, unit, format) # Inizializzazione corretta fpdf
+        
     def header(self):
         pass
+        
     def footer(self):
         self.set_y(-15)
         self.set_font("courier", "B", 9)
@@ -161,7 +167,7 @@ if generate_button:
                     temperature=0.7
                 )
                 
-                # Filtro di pulizia super robusto
+                # Filtro di pulizia righe
                 righe = []
                 for line in response.choices[0].message.content.split("\n"):
                     line = line.strip()
@@ -197,12 +203,15 @@ if generate_button:
                         )
                         image_url = str(output[0]) if isinstance(output, list) else str(output)
                         
-                        # FIX PER IL BUG WEBP: Scarichiamo l'immagine fisicamente in un file locale numerato temporaneo
+                        # --- FIX CONVERSIONE REALE WEBP -> PNG ---
                         filename = f"temp_panel_{i}.png"
                         img_response = requests.get(image_url)
+                        
                         if img_response.status_code == 200:
-                            with open(filename, "wb") as f:
-                                f.write(img_response.content)
+                            # Apriamo l'immagine scaricata (WebP nativa di Replicate) con Pillow
+                            image_webp = Image.open(BytesIO(img_response.content))
+                            # La salviamo forzatamente convertendola in un PNG REALE sul disco
+                            image_webp.save(filename, "PNG")
                         else:
                             filename = None
                         
@@ -231,7 +240,7 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE PDF STABILE ---
+                # --- COMPILAZIONE PDF CORRETTA ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
@@ -253,7 +262,7 @@ if generate_button:
                     pdf.set_text_color(150, 150, 150)
                     pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
                     
-                    # 2. INSERIMENTO VIGNETTE NEL PDF
+                    # 2. INSERIMENTO VIGNETTE CON IMMAGINI PNG CONVERTITE
                     for idx, vig in enumerate(vignette_renderizzate):
                         if idx % 2 == 0:
                             pdf.add_page()
@@ -264,12 +273,12 @@ if generate_button:
                         if vig['local_path'] and os.path.exists(vig['local_path']):
                             try:
                                 current_y = pdf.get_y()
-                                # Passiamo il percorso del file fisico: questo azzera l'errore del tipo WebP/Dizionario!
+                                # Ora 'local_path' contiene un PNG puro al 100%. FPDF non darà errori!
                                 pdf.image(vig['local_path'], x=20, y=current_y, w=170)
                                 
                                 pdf.set_y(current_y + 127.5)
                                 
-                                # Box della didascalia nera
+                                # Box didascalia
                                 pdf.set_fill_color(0, 0, 0)
                                 pdf.set_draw_color(31, 40, 51)
                                 pdf.set_line_width(0.8)
@@ -287,15 +296,15 @@ if generate_button:
                             except Exception as pdf_img_err:
                                 st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
                     
-                    # Generazione dell'output in formato stringa/bytes nativo di fpdf
+                    # Otteniamo i byte del PDF
                     pdf_bytes = pdf.output(dest='S')
                     
-                    # Pulizia dei file temporanei locali dal server per non accumulare spazio
+                    # Pulizia dei file temporanei PNG dal disco
                     for vig in vignette_renderizzate:
                         if vig['local_path'] and os.path.exists(vig['local_path']):
                             os.remove(vig['local_path'])
                 
-                # Bottone di Download pronto
+                # Bottone di Download attivato
                 st.balloons()
                 st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
