@@ -6,3 +6,4 @@ python-docx
 PyPDF2
 replicate
 weasyprint
+pillow
