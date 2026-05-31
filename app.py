@@ -1,172 +1,126 @@
-import streamlit as st
-from openai import OpenAI
-from PyPDF2 import PdfReader
-import io
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import streamlit as tf
+import openai
+import replicate
+import os
 
-# --- 1. CONFIGURAZIONE SICUREZZA ---
+# Configurazione della pagina Streamlit
+st.set_page_config(page_title="Comic AI Creator", page_icon="🎨", layout="wide")
+
+# --- GESTIONE CHIAVI API ---
+# Streamlit Secrets legge le chiavi quando l'app è online. 
+# In locale, puoi usare un file .env o impostarle nell'ambiente.
 if "OPENAI_API_KEY" in st.secrets:
-    api_key = st.secrets["OPENAI_API_KEY"]
+    openai.api_key = st.secrets["OPENAI_API_KEY"]
 else:
-    st.error("⚠️ Chiave API non trovata! Vai in Settings > Secrets su Streamlit Cloud.")
-    st.stop()
+    openai.api_key = os.getenv("OPENAI_API_KEY")
 
-client = OpenAI(api_key=api_key)
+if "REPLICATE_API_TOKEN" in st.secrets:
+    os.environ["REPLICATE_API_TOKEN"] = st.secrets["REPLICATE_API_TOKEN"]
+else:
+    os.environ["REPLICATE_API_TOKEN"] = os.getenv("REPLICATE_API_TOKEN")
 
-# --- 2. CONFIGURAZIONE LAYOUT ---
-st.set_page_config(page_title="AI Podcast Turbo", page_icon="⚡", layout="wide")
 
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    [data-testid="stSidebar"] { min-width: 350px; }
-    .stButton>button { 
-        width: 100%; 
-        border-radius: 8px; 
-        background-color: #00CC66; 
-        color: white; 
-        font-weight: bold; 
-        height: 3.5em;
-        border: none;
-    }
-    .cost-box { 
-        padding: 20px; 
-        border-radius: 10px; 
-        border: 2px solid #00CC66; 
-        background-color: #1e1e1e; /* SFONDO DARK */
-        color: #ffffff; /* TESTO BIANCO */
-    }
-    .cost-box h4 {
-        color: #00CC66; 
-        margin-top: 0;
-    }
-    .part-container {
-        padding: 10px;
-        border-bottom: 1px solid #444;
-        margin-bottom: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("🎨 Comic AI Creator")
+st.subtitle("Crea la tua tavola a fumetti usando GPT-4o-Mini e Replicate")
 
-# --- 3. SIDEBAR ---
-with st.sidebar:
-    st.title("🎙️ Configurazione")
-    st.divider()
-    language = st.selectbox("🌍 Scegli la Lingua", ["Italiano", "English", "Español", "Français", "Deutsch"])
-    st.write("---")
-    voice = st.selectbox("🗣️ Scegli la Voce", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
-    
-    st.write("🎵 Ascolta l'anteprima:")
-    voice_urls = {
-        "alloy": "https://cdn.openai.com/API/docs/audio/alloy.wav",
-        "echo": "https://cdn.openai.com/API/docs/audio/echo.wav",
-        "fable": "https://cdn.openai.com/API/docs/audio/fable.wav",
-        "onyx": "https://cdn.openai.com/API/docs/audio/onyx.wav",
-        "nova": "https://cdn.openai.com/API/docs/audio/nova.wav",
-        "shimmer": "https://cdn.openai.com/API/docs/audio/shimmer.wav"
-    }
-    st.audio(voice_urls[voice], format="audio/wav")
-    st.divider()
-    st.info("Carica un PDF a destra per calcolare i costi.")
+# --- SIDEBAR (INPUT UTENTE) ---
+st.sidebar.header("Configura il tuo Fumetto")
 
-# --- 4. FUNZIONE CORE ---
-def process_chunk(i, chunk, lang, v):
-    prompt = f"Sei un podcaster professionista. Traduci e adatta questo testo in {lang} in modo colloquiale: {chunk}"
-    chat_response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": "Sei un autore di podcast."},
-                  {"role": "user", "content": prompt}]
-    )
-    script = chat_response.choices[0].message.content
-    audio_response = client.audio.speech.create(
-        model="tts-1",
-        voice=v,
-        input=script
-    )
-    return i, audio_response.content
+# Tipo di fumetto (Stile)
+stile_fumetto = st.sidebar.selectbox(
+    "Che tipo/stile di fumetto vuoi?",
+    ["Graphic Novel Americana", "Manga Giapponese", "Fumetto Bonelli (Dylan Dog/Tex)", "Comic Book Classico", "Cartoon / Disney Style", "Cyberpunk / Sci-Fi Dark"]
+)
 
-# --- 5. INTERFACCIA PRINCIPALE ---
-st.title("⚡ AI di Antonino: Podcast Creator Turbo")
-st.write("Scarica le singole parti in tempo reale o l'intero file alla fine.")
+# Numero di vignette
+num_vignette = st.sidebar.slider("Numero di vignette (pannelli)", min_value=2, max_value=5, value=3)
 
-uploaded_file = st.file_uploader("Trascina qui il tuo file PDF", type="pdf")
+# Trama principale
+trama = st.sidebar.text_area(
+    "Inserisci la trama o l'idea principale:",
+    placeholder="Un detective privato scopre che la sua ombra ha iniziato a vivere di vita propria..."
+)
 
-if uploaded_file:
-    reader = PdfReader(uploaded_file)
-    full_text = ""
-    for page in reader.pages:
-        t = page.extract_text()
-        if t: full_text += t + " "
-    
-    char_count = len(full_text)
-    
-    if char_count > 0:
-        costo_stimato = (char_count / 1000) * 0.016
-        
-        st.markdown(f"""
-            <div class="cost-box">
-                <h4>📊 Analisi Preventiva</h4>
-                <p>Testo rilevato: <b>{char_count:,} caratteri</b></p>
-                <p>Costo totale stimato: <b>${costo_stimato:.4f} USD</b></p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        if st.button("🚀 GENERA IL PODCAST ORA"):
+# Pulsante di avvio
+generate_button = st.sidebar.button("✨ Genera Fumetto")
+
+# --- LOGICA DI GENERAZIONE ---
+if generate_button:
+    if not openai.api_key or not os.environ.get("REPLICATE_API_TOKEN"):
+        st.error("⚠️ Errore: Assicurati di aver configurato correttamente le API Key di OpenAI e Replicate nei Secrets di Streamlit!")
+    elif not trama.strip():
+        st.warning("✍️ Per favore, inserisci una trama prima di iniziare.")
+    else:
+        with st.spinner("🧠 GPT-4o-Mini sta scrivendo la sceneggiatura e i prompt delle vignette..."):
             try:
-                words = full_text.split()
-                chunk_size = 500
-                chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-                
-                st.info(f"Elaborazione di {len(chunks)} parti in corso...")
-                progress_bar = st.progress(0)
-                
-                # Container per le singole parti scaricabili
-                st.subheader("📦 Parti elaborate in tempo reale")
-                parts_container = st.container()
-                
-                results_map = {}
-                processed_count = 0
-                
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = {executor.submit(process_chunk, i, chunk, language, voice): i for i, chunk in enumerate(chunks)}
-                    
-                    for future in as_completed(futures):
-                        idx, audio_content = future.result()
-                        results_map[idx] = audio_content
-                        processed_count += 1
-                        
-                        # Aggiorna UI per la singola parte
-                        with parts_container:
-                            with st.expander(f"✅ Parte {idx + 1} Pronta", expanded=False):
-                                st.audio(audio_content, format="audio/mp3")
-                                st.download_button(
-                                    label=f"📥 Scarica Parte {idx + 1}",
-                                    data=audio_content,
-                                    file_name=f"parte_{idx + 1}.mp3",
-                                    mime="audio/mp3",
-                                    key=f"btn_{idx}"
-                                )
-                        
-                        progress_bar.progress(processed_count / len(chunks))
-
-                # Riordino per il file finale
-                sorted_indices = sorted(results_map.keys())
-                final_audio = b"".join([results_map[i] for i in sorted_indices])
-
-                st.divider()
-                st.success("🎉 PODCAST COMPLETO GENERATO!")
-                st.audio(final_audio, format="audio/mp3")
-                st.download_button(
-                    label="🔥 SCARICA PODCAST COMPLETO (UNICO FILE)",
-                    data=final_audio,
-                    file_name="podcast_completo.mp3",
-                    mime="audio/mp3",
-                    key="final_full_btn"
+                # Creiamo il prompt per GPT-4o-Mini per ottenere i prompt visivi delle vignette
+                system_prompt = (
+                    "Sei un esperto sceneggiatore di fumetti. Il tuo compito è suddividere la trama dell'utente "
+                    f"in esattamente {num_vignette} vignette sequenziali. Per ogni vignetta devi fornire: \n"
+                    "1. Il testo del dialogo o la didascalia.\n"
+                    f"2. Un prompt d'immagine dettagliato in INGLESE ottimizzato per la generazione AI, mantenendo lo stile richiesto: {stile_fumetto}. "
+                    "Assicurati che ci sia coerenza visiva dei personaggi tra le vignette.\n"
+                    "Rispondi formattando l'output esattamente in questo modo per ogni vignetta, separando i dati con '|':\n"
+                    "Vignetta X | Testo del dialogo | Prompt per l'immagine"
                 )
 
+                # Chiamata a GPT-4o-Mini (Nome del modello ufficiale: gpt-4o-mini)
+                client = openai.OpenAI()
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Trama: {trama}"}
+                    ],
+                    temperature=0.7
+                )
+                
+                sceneggiatura = response.choices[0].message.content
+                
+                # Parsing della risposta (dividiamo per righe)
+                righe = [line.strip() for line in sceneggiatura.split("\n") if "|" in line]
+                
             except Exception as e:
-                st.error(f"Si è verificato un errore: {e}")
-    else:
-        st.warning("Il PDF caricato non contiene testo leggibile.")
+                st.error(f"Errore durante la generazione del testo con OpenAI: {e}")
+                righe = []
+
+        if righe:
+            st.success("📝 Sceneggiatura pronta! Ora inizio a disegnare le vignette...")
+            
+            # Iteriamo sulle vignette generate per mandarle a Replicate
+            for riga in righe:
+                try:
+                    # Dividiamo i dati estratti da GPT
+                    parti = riga.split("|")
+                    titolo_vignetta = parti[0].strip()
+                    dialogo = parti[1].strip()
+                    image_prompt = parti[2].strip()
+                    
+                    st.write(f"### {titolo_vignetta}")
+                    st.info(f"💬 **Dialogo/Didascalia:** {dialogo}")
+                    
+                    with st.spinner(f"🎨 Replicate sta disegnando la {titolo_vignetta.lower()}..."):
+                        # Usiamo Flux-Schnell (o SDXL) su Replicate. È velocissimo e di altissima qualità.
+                        # Modello: stability-ai/sdxl o black-forest-labs/flux-schnell
+                        output = replicate.run(
+                            "black-forest-labs/flux-schnell",
+                            input={
+                                "prompt": f"{image_prompt}, comic book style, {stile_fumetto}, high quality, detailed",
+                                "aspect_ratio": "4:3",
+                                "num_outputs": 1
+                            }
+                        )
+                        
+                        # Replicate restituisce una lista di URL
+                        image_url = output[0]
+                        
+                        # Mostriamo l'immagine risultante
+                        st.image(image_url, caption=f"Scena: {dialogo}", use_container_width=True)
+                        st.markdown("---")
+                        
+                except Exception as e:
+                    st.error(f"Errore nella generazione dell'immagine per questa vignetta: {e}")
+                    st.markdown("---")
+            
+            st.balloons()
+            st.success("🎉 Il tuo fumetto è pronto!")
