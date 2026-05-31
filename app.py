@@ -3,8 +3,8 @@ import openai
 import replicate
 import os
 import requests
-import base64
-from weasyprint import HTML
+from fpdf import FPDF
+from io import BytesIO
 
 # Configurazione della pagina Streamlit (Deve essere il PRIMO comando Streamlit della pagina)
 st.set_page_config(page_title="Comic AI Creator - Book Publisher", page_icon="🎨", layout="wide")
@@ -100,22 +100,23 @@ trama = st.sidebar.text_area(
 
 generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO")
 
-# --- FUNZIONE UTILE PER CONVERTIRE IMMAGINI IN BASE64 PER IL PDF ---
-def get_image_base64(url):
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            return base64.b64encode(response.content).decode('utf-8')
-    except Exception as e:
-        print(f"Errore download immagine per Base64: {e}")
-    return ""
+# --- CLASSE CUSTOM FPDF PER IL LOOK DARK BONELLI / MANGA ---
+class ComicPDF(FPDF):
+    def header(self):
+        pass
+    def footer(self):
+        # Numero di pagina in basso a destra
+        self.set_y(-15)
+        self.set_font("courier", "B", 9)
+        self.set_text_color(150, 150, 150)
+        self.cell(0, 10, f"{self.page_no()}", align="R")
 
 # --- LOGICA DI GENERAZIONE ---
 if generate_button:
     if not openai.api_key or not os.environ.get("REPLICATE_API_TOKEN"):
         st.error("⚠️ API Key mancanti nei Secrets di Streamlit!")
     elif not trama.strip():
-        st.warning("✍ *Per favore, inserisci una trama prima di iniziare.*")
+        st.warning("✍️ *Per favore, inserisci una trama prima di iniziare.*")
     else:
         client = openai.OpenAI()
         
@@ -128,7 +129,7 @@ if generate_button:
                     "Rispondi SOLTANTO con le descrizioni dei personaggi accumulate in un unico paragrafo compatto."
                 )
                 char_response = client.chat.completions.create(
-                    model="gpt-4o-mini", model_list=None,
+                    model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": character_prompt},
                         {"role": "user", "content": f"Trama: {trama}"}
@@ -145,7 +146,7 @@ if generate_button:
         with st.spinner(f"📖 Scrittura della sceneggiatura cinematografica ({num_vignette} vignette)..."):
             try:
                 system_prompt = (
-                    "Sei un esperto sceneggiatore di fumetti e manga dark. Suddividi la trama dell'utente "
+                    "Sei un expert sceneggiatore di fumetti e manga dark. Suddividi la trama dell'utente "
                     f"in esattamente {num_vignette} vignette sequenziali per comporre un capitolo/libro completo.\n\n"
                     "Rispondi formattando l'output esattamente in questo modo per ogni riga, separando i campi con '|':\n"
                     "Titolo Vignetta | Testo Didascalia Fumetto (In Italiano, stile solenne e maiuscolo) | Prompt d'azione per l'immagine (In Inglese)\n"
@@ -164,7 +165,7 @@ if generate_button:
                 st.error(f"Errore sceneggiatura: {e}")
                 righe = []
 
-        # FASE 3: Generazione immagini e raccolta dati per il PDF
+        # FASE 3: Generazione immagini e raccolta dati
         if righe:
             st.success(f"📝 Sceneggiatura pronta! Disegno dei pannelli in corso...")
             vignette_renderizzate = []
@@ -191,14 +192,15 @@ if generate_button:
                         )
                         image_url = str(output[0]) if isinstance(output, list) else str(output)
                         
-                        # Scarica e converti l'immagine in Base64 per incorporarla nel PDF senza dipendere da URL esterni stabili
-                        img_b64 = get_image_base64(image_url)
+                        # Scarichiamo l'immagine in memoria per passarla a FPDF senza salvarla su disco
+                        img_response = requests.get(image_url)
+                        img_bytes = BytesIO(img_response.content) if img_response.status_code == 200 else None
                         
                         vignette_renderizzate.append({
                             "titolo": titolo_vignetta,
                             "dialogo": dialogo,
                             "url": image_url,
-                            "b64": img_b64
+                            "bytes": img_bytes
                         })
                 except Exception as e:
                     st.error(f"Errore nella generazione di una vignetta: {e}")
@@ -219,114 +221,78 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE ED ESPORTAZIONE PDF REALE ---
+                # --- COMPILAZIONE PDF NATIVA (FPDF2) ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
-                with st.spinner("📚 Formattazione del libro e compilazione del PDF in corso..."):
-                    # Generazione del codice HTML pulito per WeasyPrint (impaginazione da libro reale)
-                    html_content = """
-                    <html>
-                    <head>
-                    <style>
-                        @page {
-                            size: A4;
-                            margin: 15mm 15mm;
-                            background-color: #0b0c10;
-                        }
-                        body {
-                            margin: 0;
-                            padding: 0;
-                            font-family: 'Courier New', Courier, monospace;
-                            background-color: #0b0c10;
-                            color: #ffffff;
-                        }
-                        .page-title-section {
-                            text-align: center;
-                            padding-top: 60mm;
-                            page-break-after: always;
-                        }
-                        .page-title-section h1 {
-                            font-size: 32pt;
-                            letter-spacing: 2px;
-                            margin-bottom: 10px;
-                            color: #ffffff;
-                            text-transform: uppercase;
-                        }
-                        .page-title-section p {
-                            font-size: 14pt;
-                            color: #888888;
-                        }
-                        .pdf-panel-wrapper {
-                            page-break-inside: avoid;
-                            margin-bottom: 30mm;
-                            border: 4px solid #1f2833;
-                            background-color: #000000;
-                        }
-                        .pdf-img {
-                            width: 100%;
-                            display: block;
-                        }
-                        .pdf-caption {
-                            background-color: #000000;
-                            color: #ffffff;
-                            padding: 15px;
-                            font-size: 13pt;
-                            line-height: 1.5;
-                            border-top: 3px solid #1f2833;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                        }
-                        .pdf-meta {
-                            font-size: 10pt;
-                            color: #45f3ff;
-                            margin-bottom: 5px;
-                            font-weight: bold;
-                        }
-                    </style>
-                    </head>
-                    <body>
-                        <div class="page-title-section">
-                            <h1>SHADOW REQUIEM</h1>
-                            <p>Generato da Comic AI Creator</p>
-                        </div>
-                    """
+                with st.spinner("📚 Generazione del file PDF in corso..."):
+                    pdf = ComicPDF(orientation="P", unit="mm", format="A4")
+                    pdf.set_auto_page_break(auto=True, margin=15)
                     
-                    # Aggiungiamo i blocchi delle vignette nel file HTML
-                    for vig in vignette_renderizzate:
-                        if vig['b64']:
-                            html_content += f"""
-                            <div class="pdf-panel-wrapper">
-                                <img class="pdf-img" src="data:image/png;base64,{vig['b64']}">
-                                <div class="pdf-caption">
-                                    <div class="pdf-meta">{vig['titolo']}</div>
-                                    {vig['dialogo']}
-                                </div>
-                            </div>
-                            """
+                    # 1. PAGINA DI COPERTINA SCOLO COERENTE (SFONDO NERO)
+                    pdf.add_page()
+                    pdf.set_fill_color(13, 15, 18) # Sfondo scuro dell'app
+                    pdf.rect(0, 0, 210, 297, "F")
                     
-                    html_content += "</body></html>"
+                    pdf.set_y(100)
+                    pdf.set_font("courier", "B", 32)
+                    pdf.set_text_color(255, 255, 255)
+                    pdf.cell(0, 15, "SHADOW REQUIEM", align="C", ln=True)
                     
-                    # Salvataggio temporaneo del file HTML ed esecuzione di WeasyPrint per produrre il PDF
-                    html_path = "temp_comic.html"
-                    pdf_path = "libro_fumetti.pdf"
+                    pdf.set_font("courier", "I", 14)
+                    pdf.set_text_color(150, 150, 150)
+                    pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
                     
-                    with open(html_path, "w", encoding="utf-8") as f:
-                        f.write(html_content)
+                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina per la massima resa grafica)
+                    for idx, vig in enumerate(vignette_renderizzate):
+                        # Aggiungiamo una nuova pagina ogni 2 vignette per non affollare la stampa
+                        if idx % 2 == 0:
+                            pdf.add_page()
+                            pdf.set_fill_color(13, 15, 18)
+                            pdf.rect(0, 0, 210, 297, "F")
+                            pdf.set_y(15)
+                        
+                        if vig['bytes']:
+                            try:
+                                # Reset del buffer di memoria dell'immagine
+                                vig['bytes'].seek(0)
+                                
+                                # Disegno dell'immagine (Larghezza standard 170mm, centrata su A4)
+                                current_y = pdf.get_y()
+                                pdf.image(vig['bytes'], x=20, y=current_y, w=170)
+                                
+                                # Calcolo altezza proporzionale dell'immagine (aspetto 4:3) -> h = (170 * 3) / 4 = 127.5mm
+                                pdf.set_y(current_y + 127.5)
+                                
+                                # Riquadro di testo Didascalia (Sfondo Nero)
+                                pdf.set_fill_color(0, 0, 0)
+                                pdf.set_draw_color(31, 40, 51)
+                                pdf.set_line_width(0.8)
+                                
+                                # Calcoliamo quante righe occupa il testo per fare il box corretto
+                                pdf.set_font("courier", "B", 10)
+                                pdf.set_text_color(69, 243, 255) # Colore ciano per il titolo della vignetta
+                                text_title = f"{vig['titolo']} - "
+                                
+                                pdf.set_text_color(255, 255, 255) # Testo bianco
+                                full_text = text_title + vig['dialogo'].upper()
+                                
+                                # Stampiamo il blocco con lo sfondo nero attivato (ln=True ci sposta sotto per la vignetta successiva)
+                                pdf.multi_cell(170, 6, full_text, border=1, align="L", fill=True)
+                                pdf.set_y(pdf.get_y() + 12) # Spazio di distanziamento per la seconda vignetta della pagina
+                                
+                            except Exception as pdf_img_err:
+                                print(f"Errore inserimento immagine PDF: {pdf_img_err}")
                     
-                    # Trasforma l'HTML compilato in un PDF pronto all'uso
-                    HTML(html_path).write_pdf(pdf_path)
-                    
-                    # Lettura dei dati binari del PDF per permettere il download su Streamlit
-                    with open(pdf_path, "rb") as f:
-                        pdf_bytes = f.read()
+                    # Generazione dei byte del PDF direttamente in memoria
+                    pdf_output = pdf.output()
                 
-                # Rilascio del pulsante di download per l'utente
+                # Rilascio del pulsante di download
                 st.balloons()
-                st.success("🎉 Il tuo libro a fumetti è formattato e pronto!")
+                st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
                     label="📥 SCARICA IL LIBRO IN PDF (PRONTO STAMPA)",
-                    data=pdf_bytes,
+                    data=bytes(pdf_output),
                     file_name="mio_libro_a_fumetti.pdf",
                     mime="application/pdf",
                     use_container_width=True
