@@ -5,7 +5,6 @@ import os
 import requests
 from io import BytesIO
 from PIL import Image
-from fpdf import FPDF
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -13,7 +12,7 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 
 # Configurazione della pagina Streamlit
-st.set_page_config(page_title="Comic AI Creator - Ultimate Publisher", page_icon="🎨", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Comic AI Creator - KDP Word Publisher", page_icon="🎨", layout="wide", initial_sidebar_state="expanded")
 
 # --- CSS AVANZATO: BLOCCO SIDEBAR E RIMOZIONE MENU IN ALTO A DESTRA ---
 st.markdown("""
@@ -72,24 +71,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNZIONE DI PULIZIA TESTO PER EVITARE UNICODEENCODEERROR IN FPDF ---
-def clean_text_for_latin1(text):
-    if not text:
-        return ""
-    replacements = {
-        '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"',
-        '\u2013': '-', '\u2014': '-', '\u2026': '...',
-        'à': "a'", 'è': "e'", 'é': "e'", 'ì': "i'", 'ò': "o'", 'ù': "u'"
-    }
-    for unicode_char, latin1_char in replacements.items():
-        text = text.replace(unicode_char, latin1_char)
-    return text.encode('latin-1', 'ignore').decode('latin-1')
-
 # --- INIZIALIZZAZIONE DELLO STATO DI MEMORIA ---
 if "vignette_generate" not in st.session_state:
     st.session_state["vignette_generate"] = []
-if "pdf_data" not in st.session_state:
-    st.session_state["pdf_data"] = None
 if "word_data" not in st.session_state:
     st.session_state["word_data"] = None
 
@@ -104,11 +88,11 @@ if "REPLICATE_API_TOKEN" in st.secrets:
 else:
     os.environ["REPLICATE_API_TOKEN"] = os.getenv("REPLICATE_API_TOKEN")
 
-st.title("影🎨 Comic AI Creator & Book Publisher")
-st.markdown("### Genera fino a 200 vignette e scarica l'opera formattata in PDF o WORD")
+st.title("影🎨 Comic AI Creator & KDP Word Publisher")
+st.markdown("### Genera fino a 200 vignette e scarica il tuo libro Word pronto nel formato KDP 6\"x9\"")
 
 # --- SIDEBAR (INPUT UTENTE) ---
-st.sidebar.header("📚 Configura la tua Opera")
+st.sidebar.header("📚 Configura il tuo Libro")
 
 stile_fumetto = st.sidebar.selectbox(
     "Scegli lo stile grafico:",
@@ -120,7 +104,7 @@ stile_fumetto = st.sidebar.selectbox(
     ]
 )
 
-num_vignette = st.sidebar.slider("Numero di vignette totali", min_value=2, max_value=200, value=4, step=1)
+num_vignette = st.sidebar.slider("Numero di vignette totali", min_value=2, max_value=200, value=6, step=1)
 
 layout_scelta = st.sidebar.selectbox(
     "Struttura anteprima web (Layout):",
@@ -133,21 +117,9 @@ trama = st.sidebar.text_area(
     height=150
 )
 
-generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO")
+generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO WORD")
 
-# --- CLASSE CUSTOM FPDF ---
-class ComicPDF(FPDF):
-    def __init__(self, orientation="P", unit="mm", format="A4"):
-        super().__init__(orientation, unit, format)
-    def header(self):
-        pass
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("courier", "B", 9)
-        self.set_text_color(150, 150, 150)
-        self.cell(0, 10, f"{self.page_no()}", align="R")
-
-# --- LOGICA DI GENERAZIONE (ESECUTO SOLO AL CLICK DEL PULSANTE GENERATE) ---
+# --- LOGICA DI GENERAZIONE ---
 if generate_button:
     if not openai.api_key or not os.environ.get("REPLICATE_API_TOKEN"):
         st.error("⚠️ API Key mancanti nei Secrets di Streamlit!")
@@ -156,7 +128,6 @@ if generate_button:
     else:
         # Resettiamo la memoria precedente per una nuova generazione
         st.session_state["vignette_generate"] = []
-        st.session_state["pdf_data"] = None
         st.session_state["word_data"] = None
         
         client = openai.OpenAI()
@@ -182,7 +153,7 @@ if generate_button:
                 st.sidebar.error(f"Errore coerenza: {e}")
                 personaggi_coerenza = ""
 
-        # FASE 2: Storyboard a blocchi (Chunking)
+        # FASE 2: Storyboard a blocchi (Chunking) fino a 200 vignette
         righe = []
         vignette_per_blocco = 10
         tot_blocchi = (num_vignette + vignette_per_blocco - 1) // vignette_per_blocco
@@ -254,7 +225,7 @@ if generate_button:
                             ram_buffer_png = BytesIO(img_response.content)
                             image_webp = Image.open(ram_buffer_png)
                             
-                            # Convertiamo e salviamo in RAM come byte PNG grezzi
+                            # Convertiamo e salviamo in RAM come byte PNG
                             out_png_buffer = BytesIO()
                             image_webp.save(out_png_buffer, "PNG")
                             out_png_buffer.seek(0)
@@ -262,7 +233,6 @@ if generate_button:
                         else:
                             png_bytes = None
                         
-                        # Salviamo tutto nell'array temporaneo
                         st.session_state["vignette_generate"].append({
                             "titolo": titolo_vignetta,
                             "dialogo": dialogo,
@@ -272,105 +242,86 @@ if generate_button:
                 except Exception as e:
                     st.error(f"Errore nella generazione della vignetta {i+1}: {e}")
 
-            # --- GENERAZIONE COMPILAZIONE FILE PDF IN RAM ---
+            # --- COMPILAZIONE FILE WORD (.DOCX) IN RAM CONFIGURATO IN 6x9 POLLICI PER AMAZON KDP ---
             if st.session_state["vignette_generate"]:
-                pdf = ComicPDF(orientation="P", unit="mm", format="A4")
-                pdf.set_auto_page_break(auto=True, margin=15)
-                
-                pdf.add_page()
-                pdf.set_fill_color(13, 15, 18) 
-                pdf.rect(0, 0, 210, 297, "F")
-                pdf.set_y(100)
-                pdf.set_font("courier", "B", 32)
-                pdf.set_text_color(255, 255, 255)
-                pdf.cell(0, 15, clean_text_for_latin1("SHADOW REQUIEM"), align="C", ln=True)
-                
-                for idx, vig in enumerate(st.session_state["vignette_generate"]):
-                    if idx % 2 == 0:
-                        pdf.add_page()
-                        pdf.set_fill_color(13, 15, 18)
-                        pdf.rect(0, 0, 210, 297, "F")
-                        pdf.set_y(15)
+                with st.spinner("📝 Compilazione e formattazione del file Word 6\"x9\" per KDP..."):
+                    doc = Document()
                     
-                    if vig['png_bytes']:
-                        try:
-                            current_y = pdf.get_y()
-                            # Passiamo i byte direttamente tramite BytesIO a FPDF
-                            pdf.image(BytesIO(vig['png_bytes']), x=20, y=current_y, w=170)
-                            pdf.set_y(current_y + 127.5)
-                            
-                            pdf.set_fill_color(0, 0, 0)
-                            pdf.set_draw_color(31, 40, 51)
-                            pdf.set_line_width(0.8)
-                            
-                            pdf.set_font("courier", "B", 10)
-                            pdf.set_text_color(69, 243, 255) 
-                            text_title = f"{vig['titolo']} - "
-                            pdf.set_text_color(255, 255, 255) 
-                            full_text = text_title + vig['dialogo'].upper()
-                            
-                            pdf.multi_cell(170, 6, clean_text_for_latin1(full_text), border=1, align="L", fill=True)
-                            pdf.set_y(pdf.get_y() + 12) 
-                        except Exception as e:
-                            print(e)
-                            
-                st.session_state["pdf_data"] = pdf.output(dest='S')
-
-                # --- GENERAZIONE COMPILAZIONE FILE WORD (.DOCX) IN RAM ---
-                doc = Document()
-                for section in doc.sections:
-                    section.top_margin = Inches(0.6)
-                    section.bottom_margin = Inches(0.6)
-                    section.left_margin = Inches(0.6)
-                    section.right_margin = Inches(0.6)
-                
-                title_p = doc.add_paragraph()
-                title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                title_run = title_p.add_run("SHADOW REQUIEM\n")
-                title_run.font.name = 'Courier New'
-                title_run.font.size = Pt(36)
-                title_run.font.bold = True
-                
-                doc.add_page_break()
-                
-                for vig in st.session_state["vignette_generate"]:
-                    if vig['png_bytes']:
-                        try:
-                            table = doc.add_table(rows=2, cols=1)
-                            table.autofit = False
-                            table.columns[0].width = Inches(6.5)
-                            
-                            cell_img = table.cell(0, 0)
-                            p_img = cell_img.paragraphs[0]
-                            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(6.2))
-                            
-                            cell_cap = table.cell(1, 0)
-                            shading_xml = parse_xml(r'<w:shd {} w:fill="000000"/>'.format(nsdecls('w')))
-                            cell_cap._tc.get_or_add_tcPr().append(shading_xml)
-                            
-                            p_cap = cell_cap.paragraphs[0]
-                            run_title = p_cap.add_run(f"{vig['titolo'].upper()} - ")
-                            run_title.font.name = 'Courier New'
-                            run_title.font.size = Pt(11)
-                            run_title.font.color.rgb = RGBColor(69, 243, 255)
-                            
-                            run_text = p_cap.add_run(vig['dialogo'].upper())
-                            run_text.font.name = 'Courier New'
-                            run_text.font.size = Pt(11)
-                            run_text.font.color.rgb = RGBColor(255, 255, 255)
-                            
-                            doc.add_paragraph("\n")
-                        except Exception as e:
-                            print(e)
+                    # 1. Configurazione Dimensioni Pagina 6x9 pollici ed impostazione margini di taglio (Bleed)
+                    sections = doc.sections
+                    for section in sections:
+                        section.page_width = Inches(6.0)     # Larghezza KDP Standard
+                        section.page_height = Inches(9.0)    # Altezza KDP Standard
+                        section.top_margin = Inches(0.76)    # Margine di sicurezza superiore
+                        section.bottom_margin = Inches(0.76) # Margine di sicurezza inferiore
+                        section.left_margin = Inches(0.76)   # Margine interno (Gutter/Rilegatura sicuro)
+                        section.right_margin = Inches(0.76)  # Margine esterno
+                    
+                    # 2. Pagina di Copertina Interna del Libro Word
+                    title_p = doc.add_paragraph()
+                    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    doc.add_paragraph("\n\n\n") # Spaziatura verticale per centrare il titolo
+                    
+                    title_run = title_p.add_run("SHADOW REQUIEM\n\n")
+                    title_run.font.name = 'Courier New'
+                    title_run.font.size = Pt(28)
+                    title_run.font.bold = True
+                    
+                    sub_run = title_p.add_run("Volume a Fumetti\nEdito con AI Creator")
+                    sub_run.font.name = 'Courier New'
+                    sub_run.font.size = Pt(12)
+                    sub_run.italic = True
+                    
+                    doc.add_page_break()
+                    
+                    # 3. Inserimento Tavole (1 Vignetta per pagina in formato 6x9)
+                    for vig in st.session_state["vignette_generate"]:
+                        if vig['png_bytes']:
+                            try:
+                                # Creiamo la griglia-tabella a cella singola per mantenere l'estetica fumetto
+                                table = doc.add_table(rows=2, cols=1)
+                                table.autofit = False
+                                # La larghezza utile della cella calcolata sui margini (6.0 - 0.76 - 0.76 = 4.48 pollici)
+                                table.columns[0].width = Inches(4.48)
+                                
+                                # Cella 1: Immagine Vignetta adattata proporzionalmente al formato 6x9
+                                cell_img = table.cell(0, 0)
+                                p_img = cell_img.paragraphs[0]
+                                p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(4.3))
+                                
+                                # Cella 2: Didascalia Fumetto (Sfondo Nero, Testo Bianco Monospace)
+                                cell_cap = table.cell(1, 0)
+                                shading_xml = parse_xml(r'<w:shd {} w:fill="000000"/>'.format(nsdecls('w')))
+                                cell_cap._tc.get_or_add_tcPr().append(shading_xml)
+                                
+                                p_cap = cell_cap.paragraphs[0]
+                                p_cap.paragraph_format.left_indent = Inches(0.1)
+                                p_cap.paragraph_format.right_indent = Inches(0.1)
+                                
+                                run_title = p_cap.add_run(f"{vig['titolo'].upper()} - ")
+                                run_title.font.name = 'Courier New'
+                                run_title.font.size = Pt(9.5)
+                                run_title.font.bold = True
+                                run_title.font.color.rgb = RGBColor(69, 243, 255) # Colore Ciano
+                                
+                                run_text = p_cap.add_run(vig['dialogo'].upper())
+                                run_text.font.name = 'Courier New'
+                                run_text.font.size = Pt(9.5)
+                                run_text.font.bold = True
+                                run_text.font.color.rgb = RGBColor(255, 255, 255) # Testo Bianco
+                                
+                                # Forza l'interruzione di pagina: ogni vignetta occupa una pagina KDP pulita ed indipendente
+                                doc.add_page_break()
+                            except Exception as e:
+                                print(f"Errore KDP Word: {e}")
                 
                 word_buffer = BytesIO()
                 doc.save(word_buffer)
                 word_buffer.seek(0)
                 st.session_state["word_data"] = word_buffer.getvalue()
 
-
-# --- RENDERING COERENTE (FUORI DALL'IF GENERATE_BUTTON): LEGGE DALLO SESSION_STATE ---
+# --- RENDERING ANTEPRIMA (FUORI DALL'IF GENERATE_BUTTON PER MANTENERE I DATI ATTIVI) ---
 if st.session_state["vignette_generate"]:
     st.markdown("## 📖 ANTEPRIMA DEL LIBRO A FUMETTI")
     st.markdown("---")
@@ -388,28 +339,16 @@ if st.session_state["vignette_generate"]:
             </div>
             """, unsafe_allow_html=True)
 
-    # --- AREA EXPORT FISSA ---
+    # --- AREA EXPORT UNICA E BLOCCATA IN BASSO ---
     st.markdown("---")
-    st.markdown("## 📦 AREA EXPORT & DOWNLOAD")
+    st.markdown("## 📦 AREA EXPORT KDP AMAZON")
     
-    dl_col1, dl_col2 = st.columns(2)
-    
-    if st.session_state["pdf_data"]:
-        with dl_col1:
-            st.download_button(
-                label="📥 SCARICA IL LIBRO IN PDF (PRONTO STAMPA)",
-                data=st.session_state["pdf_data"],
-                file_name="mio_libro_a_fumetti.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-            
     if st.session_state["word_data"]:
-        with dl_col2:
-            st.download_button(
-                label="📝 SCARICA IL LIBRO IN WORD (.DOCX EDITABILE)",
-                data=st.session_state["word_data"],
-                file_name="mio_libro_a_fumetti.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
+        st.success(f"🎉 Elaborazione completata con successo! Il tuo file Microsoft Word è pronto.")
+        st.download_button(
+            label="📥 DOWNLOAD LIBRO FUMETTI IN WORD (.DOCX FORMATTATO 6x9 PER KDP)",
+            data=st.session_state["word_data"],
+            file_name="mio_libro_kdp_6x9.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
