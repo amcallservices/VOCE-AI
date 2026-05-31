@@ -58,7 +58,7 @@ if generate_button:
                 character_prompt = (
                     "Analizza la seguente trama e identifica i personaggi principali. "
                     "Crea una descrizione fisica dettagliata in INGLESE per ognuno di essi (es. genere, età apparente, vestiti fissi, capelli, espressione tipica). "
-                    "Queste descrizioni verranno usate como prompt per un'IA generativa di immagini, quindi sii visivo, chiaro e conciso. "
+                    "Queste descrizioni verranno usate come prompt per un'IA generativa di immagini, quindi sii visivo, chiaro e conciso. "
                     "Rispondi SOLTANTO con le descrizioni dei personaggi accumulate in un unico paragrafo compatto."
                 )
                 
@@ -88,7 +88,7 @@ if generate_button:
                     "La progressione deve coprire l'intera storia dall'inizio alla fine in modo fluido.\n\n"
                     "Per ogni vignetta devi fornire tassativamente:\n"
                     "1. Il testo del dialogo o la didascalia narrativa (in italiano).\n"
-                    "2. Un prompt d'immagine d'azione dettagliato in INGLESE focalizzato sull'ambiente e sui movimenti.\n\n"
+                    "2. Un prompt d'immagine d'azione dettagliato in INGLESE focalizzato su un singolo riquadro, descrivendo l'inquadratura (es. close-up, medium shot), i dettagli dei personaggi coinvolti e l'azione senza includere balloon di testo o scritte nell'immagine.\n\n"
                     "Rispondi formattando l'output esattamente in questo modo per ogni singola riga, separando i campi con il carattere '|':\n"
                     "Vignetta X | Testo del dialogo o didascalia | Prompt d'azione per l'immagine\n"
                     "Non aggiungere introduzioni o altre parole, scrivi solo le righe formattate con '|'."
@@ -128,10 +128,13 @@ if generate_button:
                     st.info(f"💬 **Testo/Didascalia:** {dialogo}")
                     
                     with st.spinner(f"🎨 Disegno in corso per {titolo_vignetta.lower()}..."):
-                        # Uniamo le caratteristiche fisse dei personaggi con l'azione specifica della vignetta e lo stile scelto
+                        # Modificato il prompt finale inserendo comandi grafici espliciti per la struttura da fumetto (vignetta singola, bordi netti, no collage)
                         prompt_finale = (
-                            f"{action_prompt}. Character appearance guidelines: {personaggi_coerenza}. "
-                            f"Comic book panel, style: {stile_fumetto}, highly detailed, sequential art, crisp lines."
+                            f"A single, isolated comic book panel, {stile_fumetto} style, crisp line art, ink outline. "
+                            f"Scene description: {action_prompt}. "
+                            f"Character appearance guidelines: {personaggi_coerenza}. "
+                            f"Detailed background, vibrant sequential art color palette, distinct comic panel border. "
+                            f"No text, no speech bubbles, no words, single image view."
                         )
                         
                         output = replicate.run(
@@ -144,7 +147,6 @@ if generate_button:
                         )
                         
                         # FIX: Gestione del nuovo formato FileOutput / Liste di Replicate
-                        # Se è una lista di oggetti FileOutput, prendiamo il primo e lo convertiamo in stringa (URL)
                         if isinstance(output, list):
                             image_url = str(output[0])
                         else:
