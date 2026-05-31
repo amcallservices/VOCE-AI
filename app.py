@@ -3,9 +3,9 @@ import openai
 import replicate
 import os
 import requests
+
+# Forziamo l'uso di FPDF classico per la massima stabilità
 from fpdf import FPDF
-from io import BytesIO
-from PIL import Image  # <-- AGGIUNTO: Per gestire correttamente le immagini in memoria nel PDF
 
 # Configurazione della pagina Streamlit (Deve essere il PRIMO comando Streamlit della pagina)
 st.set_page_config(page_title="Comic AI Creator - Book Publisher", page_icon="🎨", layout="wide")
@@ -101,12 +101,11 @@ trama = st.sidebar.text_area(
 
 generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO")
 
-# --- CLASSE CUSTOM FPDF PER IL LOOK DARK BONELLI / MANGA ---
+# --- CLASSE CUSTOM FPDF ---
 class ComicPDF(FPDF):
     def header(self):
         pass
     def footer(self):
-        # Numero di pagina in basso a destra
         self.set_y(-15)
         self.set_font("courier", "B", 9)
         self.set_text_color(150, 150, 150)
@@ -151,7 +150,7 @@ if generate_button:
                     f"in esattamente {num_vignette} vignette sequenziali per comporre un capitolo/libro completo.\n\n"
                     "Rispondi formattando l'output esattamente in questo modo per ogni riga, separando i campi con '|':\n"
                     "Titolo Vignetta | Testo Didascalia Fumetto (In Italiano, stile solenne e maiuscolo) | Prompt d'azione per l'immagine (In Inglese)\n"
-                    "Non aggiungere introduzioni o altre parole."
+                    "Non aggiungere introduzioni, markdown extra, trattini, o elenchi puntati. Scrivi SOLO le righe con il carattere '|'."
                 )
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -161,21 +160,26 @@ if generate_button:
                     ],
                     temperature=0.7
                 )
-                righe = [line.strip() for line in response.choices[0].message.content.split("\n") if "|" in line]
+                
+                # Filtro di pulizia super robusto
+                righe = []
+                for line in response.choices[0].message.content.split("\n"):
+                    line = line.strip()
+                    if "|" in line and "titolo" not in line.lower() and len(line.split("|")) >= 3:
+                        righe.append(line)
+                        
             except Exception as e:
                 st.error(f"Errore sceneggiatura: {e}")
                 righe = []
 
         # FASE 3: Generazione immagini e raccolta dati
         if righe:
-            st.success(f"📝 Sceneggiatura pronta! Disegno dei pannelli in corso...")
+            st.success(f"📝 Sceneggiatura di {len(righe)} vignette pronta! Disegno dei pannelli in corso...")
             vignette_renderizzate = []
             
-            for riga in righe:
+            for i, riga in enumerate(righe):
                 try:
                     parti = riga.split("|")
-                    if len(parti) < 3:
-                        continue
                     titolo_vignetta = parti[0].strip()
                     dialogo = parti[1].strip()
                     action_prompt = parti[2].strip()
@@ -193,15 +197,20 @@ if generate_button:
                         )
                         image_url = str(output[0]) if isinstance(output, list) else str(output)
                         
-                        # Scarichiamo l'immagine in memoria per passarla a FPDF
+                        # FIX PER IL BUG WEBP: Scarichiamo l'immagine fisicamente in un file locale numerato temporaneo
+                        filename = f"temp_panel_{i}.png"
                         img_response = requests.get(image_url)
-                        img_bytes = BytesIO(img_response.content) if img_response.status_code == 200 else None
+                        if img_response.status_code == 200:
+                            with open(filename, "wb") as f:
+                                f.write(img_response.content)
+                        else:
+                            filename = None
                         
                         vignette_renderizzate.append({
                             "titolo": titolo_vignetta,
                             "dialogo": dialogo,
                             "url": image_url,
-                            "bytes": img_bytes
+                            "local_path": filename
                         })
                 except Exception as e:
                     st.error(f"Errore nella generazione di una vignetta: {e}")
@@ -222,7 +231,7 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE PDF NATIVA (FPDF2 CON PIL CORRECTION) ---
+                # --- COMPILAZIONE PDF STABILE ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
@@ -230,7 +239,7 @@ if generate_button:
                     pdf = ComicPDF(orientation="P", unit="mm", format="A4")
                     pdf.set_auto_page_break(auto=True, margin=15)
                     
-                    # 1. PAGINA DI COPERTINA CON SFONDO SCURO
+                    # 1. PAGINA DI COPERTINA
                     pdf.add_page()
                     pdf.set_fill_color(13, 15, 18) 
                     pdf.rect(0, 0, 210, 297, "F")
@@ -244,7 +253,7 @@ if generate_button:
                     pdf.set_text_color(150, 150, 150)
                     pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
                     
-                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina)
+                    # 2. INSERIMENTO VIGNETTE NEL PDF
                     for idx, vig in enumerate(vignette_renderizzate):
                         if idx % 2 == 0:
                             pdf.add_page()
@@ -252,22 +261,15 @@ if generate_button:
                             pdf.rect(0, 0, 210, 297, "F")
                             pdf.set_y(15)
                         
-                        if vig['bytes']:
+                        if vig['local_path'] and os.path.exists(vig['local_path']):
                             try:
-                                # Reset del buffer dell'immagine
-                                vig['bytes'].seek(0)
-                                
-                                # FIX DEFINITIVO: Convertiamo l'oggetto BytesIO in un oggetto Immagine PIL valido per fpdf2
-                                pil_image = Image.open(vig['bytes'])
-                                
-                                # Disegno dell'immagine PIL (Larghezza 170mm)
                                 current_y = pdf.get_y()
-                                pdf.image(pil_image, x=20, y=current_y, w=170)
+                                # Passiamo il percorso del file fisico: questo azzera l'errore del tipo WebP/Dizionario!
+                                pdf.image(vig['local_path'], x=20, y=current_y, w=170)
                                 
-                                # Altezza proporzionale 4:3 (127.5mm)
                                 pdf.set_y(current_y + 127.5)
                                 
-                                # Riquadro nero per didascalia stile "Shadow Requiem"
+                                # Box della didascalia nera
                                 pdf.set_fill_color(0, 0, 0)
                                 pdf.set_draw_color(31, 40, 51)
                                 pdf.set_line_width(0.8)
@@ -285,10 +287,15 @@ if generate_button:
                             except Exception as pdf_img_err:
                                 st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
                     
-                    # Estrazione pulita dei byte del documento PDF (dest='S' restituisce un byte-string nativo pronto)
-                    pdf_bytes = pdf.output()
+                    # Generazione dell'output in formato stringa/bytes nativo di fpdf
+                    pdf_bytes = pdf.output(dest='S')
+                    
+                    # Pulizia dei file temporanei locali dal server per non accumulare spazio
+                    for vig in vignette_renderizzate:
+                        if vig['local_path'] and os.path.exists(vig['local_path']):
+                            os.remove(vig['local_path'])
                 
-                # Rilascio definitivo del pulsante di download
+                # Bottone di Download pronto
                 st.balloons()
                 st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
