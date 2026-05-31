@@ -5,6 +5,7 @@ import os
 import requests
 from fpdf import FPDF
 from io import BytesIO
+from PIL import Image  # <-- AGGIUNTO: Per gestire correttamente le immagini in memoria nel PDF
 
 # Configurazione della pagina Streamlit (Deve essere il PRIMO comando Streamlit della pagina)
 st.set_page_config(page_title="Comic AI Creator - Book Publisher", page_icon="🎨", layout="wide")
@@ -221,7 +222,7 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE PDF NATIVA (FPDF2 CON OUTPUT IN BUFFER) ---
+                # --- COMPILAZIONE PDF NATIVA (FPDF2 CON PIL CORRECTION) ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
@@ -256,9 +257,12 @@ if generate_button:
                                 # Reset del buffer dell'immagine
                                 vig['bytes'].seek(0)
                                 
-                                # Disegno dell'immagine (Larghezza 170mm)
+                                # FIX DEFINITIVO: Convertiamo l'oggetto BytesIO in un oggetto Immagine PIL valido per fpdf2
+                                pil_image = Image.open(vig['bytes'])
+                                
+                                # Disegno dell'immagine PIL (Larghezza 170mm)
                                 current_y = pdf.get_y()
-                                pdf.image(vig['bytes'], x=20, y=current_y, w=170)
+                                pdf.image(pil_image, x=20, y=current_y, w=170)
                                 
                                 # Altezza proporzionale 4:3 (127.5mm)
                                 pdf.set_y(current_y + 127.5)
@@ -281,12 +285,10 @@ if generate_button:
                             except Exception as pdf_img_err:
                                 st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
                     
-                    # FIX DEFINITIVO: Esportiamo il PDF come stringa di byte in memoria usando fpdf2 nativo
-                    pdf_buffer = BytesIO()
-                    pdf.output(dest='S') # Genera la stringa di dati del PDF
-                    pdf_bytes = pdf.output() # Ottiene i byte puliti direttamente
+                    # Estrazione pulita dei byte del documento PDF (dest='S' restituisce un byte-string nativo pronto)
+                    pdf_bytes = pdf.output()
                 
-                # Rilascio definitivo del pulsante di download funzionante
+                # Rilascio definitivo del pulsante di download
                 st.balloons()
                 st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
