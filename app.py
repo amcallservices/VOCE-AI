@@ -102,6 +102,9 @@ st.markdown("### Genera fino a 200 vignette con testo e immagini uniti nella ste
 # --- SIDEBAR (INPUT UTENTE) ---
 st.sidebar.header("📚 Configura il tuo Libro")
 
+# Nuova opzione per inserire il titolo del libro personalizzato
+titolo_libro = st.sidebar.text_input("Inserisci il Titolo del Libro:", placeholder="Es. L'Ombra del Destino")
+
 stile_fumetto = st.sidebar.selectbox(
     "Scegli lo stile grafico:",
     [
@@ -143,6 +146,9 @@ if generate_button:
         st.session_state["vignette_generate"] = []
         st.session_state["word_data"] = None
         
+        # Validazione del titolo inserito
+        titolo_finale_libro = titolo_libro.strip().upper() if titolo_libro.strip() else "IL MIO ROMANZO ILLUSTRATO"
+        
         client = openai.OpenAI()
         
         # FASE 1: Coerenza Personaggi
@@ -166,7 +172,7 @@ if generate_button:
                 st.sidebar.error(f"Errore coerenza: {e}")
                 personaggi_coerenza = ""
 
-        # FASE 2: Storyboard a blocchi (Chunking) con testo della storia medio-lungo
+        # FASE 2: Storyboard a blocchi (Chunking)
         righe = []
         vignette_per_blocco = 5 
         tot_blocchi = (num_vignette + vignette_per_blocco - 1) // vignette_per_blocco
@@ -260,7 +266,7 @@ if generate_button:
                 except Exception as e:
                     st.error(f"Errore nella generazione della scena {i+1}: {e}")
 
-            # --- COMPILAZIONE FILE WORD (.DOCX) 6x9 POLLICI PER KDP (TESTO + IMMAGINE NELLA STESSA PAGINA) ---
+            # --- COMPILAZIONE FILE WORD (.DOCX) 6x9 POLLICI PER KDP ---
             if st.session_state["vignette_generate"]:
                 with st.spinner("📝 Generazione del manoscritto Word KDP Unificato..."):
                     doc = Document()
@@ -275,24 +281,19 @@ if generate_button:
                         section.left_margin = Inches(0.76)
                         section.right_margin = Inches(0.76)
                     
-                    # Frontespizio / Copertina Interna
-                    doc.add_paragraph("\n\n\n")
+                    # Frontespizio / Copertina Interna Pulita: Solo il Titolo Utente
+                    doc.add_paragraph("\n\n\n\n\n")
                     title_p = doc.add_paragraph()
                     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    title_run = title_p.add_run("SHADOW REQUIEM\n\n")
+                    title_run = title_p.add_run(f"{titolo_finale_libro}\n")
                     title_run.font.name = 'Courier New'
-                    title_run.font.size = Pt(28)
+                    title_run.font.size = Pt(26)
                     title_run.font.bold = True
-                    
-                    sub_run = title_p.add_run("Romanzo Illustrato ad Alta Coerenza\nFormato Unificato KDP 6\"x9\"")
-                    sub_run.font.name = 'Courier New'
-                    sub_run.font.size = Pt(11)
-                    sub_run.italic = True
                     
                     doc.add_page_break()
                     
-                    # Costruzione delle singole pagine unificate
-                    for vig in st.session_state["vignette_generate"]:
+                    # Costruzione delle pagine unificate (Testo + Immagine)
+                    for idx, vig in enumerate(st.session_state["vignette_generate"]):
                         # 1. PARTE SUPERIORE DELLA PAGINA: Storia Testuale Romanzata
                         storia_pulita = vig.get('storia', '')
                         p_story = doc.add_paragraph()
@@ -300,18 +301,18 @@ if generate_button:
                         p_story.paragraph_format.line_spacing = 1.15
                         p_story.paragraph_format.space_after = Pt(8)
                         
-                        # Titolo della scena / Capitolo
+                        # Titolo della singola scena
                         run_chap = p_story.add_run(f"--- {vig['titolo'].upper()} ---\n")
                         run_chap.font.name = 'Georgia'
                         run_chap.font.size = Pt(11)
                         run_chap.font.bold = True
                         
-                        # Testo narrativo in prosa
+                        # Testo narrativo
                         run_story = p_story.add_run(storia_pulita)
                         run_story.font.name = 'Georgia'
                         run_story.font.size = Pt(9.5)
                         
-                        # Aggiungiamo un piccolo spazio vuoto prima del disegno
+                        # Spazio vuoto prima del disegno
                         p_space = doc.add_paragraph()
                         p_space.paragraph_format.space_after = Pt(6)
                         
@@ -320,10 +321,9 @@ if generate_button:
                             try:
                                 table = doc.add_table(rows=2, cols=1)
                                 table.autofit = False
-                                # Larghezza massima per stare nei margini 6x9 (4.48 pollici)
                                 table.columns[0].width = Inches(4.48)
                                 
-                                # Inserimento Immagine (ridimensionata a 3.3 pollici per garantire la convivenza sulla stessa pagina)
+                                # Inserimento Immagine (ridimensionata per la pagina unificata)
                                 cell_img = table.cell(0, 0)
                                 p_img = cell_img.paragraphs[0]
                                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -353,8 +353,9 @@ if generate_button:
                             except Exception as e:
                                 print(e)
                         
-                        # INTERRUZIONE DI PAGINA CRUCIALE: Viene inserita SOLO dopo che sia il testo che l'immagine della scena sono stati scritti sulla stessa pagina.
-                        doc.add_page_break()
+                        # FIX DEFINITIVO PAGINA VUOTA: Inserisce l'interruzione SOLO se NON siamo all'ultima pagina
+                        if idx < len(st.session_state["vignette_generate"]) - 1:
+                            doc.add_page_break()
                 
                 word_buffer = BytesIO()
                 doc.save(word_buffer)
@@ -388,7 +389,7 @@ if st.session_state["vignette_generate"]:
     st.markdown("## 📦 AREA EXPORT KDP AMAZON")
     
     if st.session_state["word_data"]:
-        st.success("🎉 Libro generato! Ogni pagina del file Word contiene ora sia la storia testuale che la tavola illustrata nello spazio 6\"x9\".")
+        st.success("🎉 Libro generato! Ogni pagina del file Word contiene la storia testuale e la tavola illustrata unite in formato 6\"x9\" (senza pagine vuote finali).")
         st.download_button(
             label="📥 DOWNLOAD LIBRO UNIFICATO (STORIA + ILLUSTRAZIONI UNITE IN WORD 6x9)",
             data=st.session_state["word_data"],
