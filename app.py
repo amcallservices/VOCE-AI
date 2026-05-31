@@ -124,7 +124,7 @@ if generate_button:
         with st.spinner("🧠 Analisi della trama e strutturazione dei personaggi..."):
             try:
                 character_prompt = (
-                    "Analizza la McKinley trama e identifica i personaggi principali. "
+                    "Analizza la trama e identifica i personaggi principali. "
                     "Crea una descrizione fisica molto dettagliata in INGLESE per ognuno di essi. "
                     "Rispondi SOLTANTO con le descrizioni dei personaggi accumulate in un unico paragrafo compatto."
                 )
@@ -192,7 +192,7 @@ if generate_button:
                         )
                         image_url = str(output[0]) if isinstance(output, list) else str(output)
                         
-                        # Scarichiamo l'immagine in memoria per passarla a FPDF senza salvarla su disco
+                        # Scarichiamo l'immagine in memoria per passarla a FPDF
                         img_response = requests.get(image_url)
                         img_bytes = BytesIO(img_response.content) if img_response.status_code == 200 else None
                         
@@ -231,7 +231,7 @@ if generate_button:
                     
                     # 1. PAGINA DI COPERTINA CON SFONDO SCURO
                     pdf.add_page()
-                    pdf.set_fill_color(13, 15, 18) # Sfondo scuro coerente
+                    pdf.set_fill_color(13, 15, 18) 
                     pdf.rect(0, 0, 210, 297, "F")
                     
                     pdf.set_y(100)
@@ -243,7 +243,7 @@ if generate_button:
                     pdf.set_text_color(150, 150, 150)
                     pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
                     
-                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina per una resa fumettistica ottimale)
+                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina)
                     for idx, vig in enumerate(vignette_renderizzate):
                         if idx % 2 == 0:
                             pdf.add_page()
@@ -256,4 +256,41 @@ if generate_button:
                                 # Reset del buffer dell'immagine
                                 vig['bytes'].seek(0)
                                 
-                                # Disegno dell'immagine (
+                                # Disegno dell'immagine (Larghezza 170mm)
+                                current_y = pdf.get_y()
+                                pdf.image(vig['bytes'], x=20, y=current_y, w=170)
+                                
+                                # Altezza proporzionale 4:3 (127.5mm)
+                                pdf.set_y(current_y + 127.5)
+                                
+                                # Riquadro nero per didascalia stile "Shadow Requiem"
+                                pdf.set_fill_color(0, 0, 0)
+                                pdf.set_draw_color(31, 40, 51)
+                                pdf.set_line_width(0.8)
+                                
+                                pdf.set_font("courier", "B", 10)
+                                pdf.set_text_color(69, 243, 255) 
+                                text_title = f"{vig['titolo']} - "
+                                
+                                pdf.set_text_color(255, 255, 255) 
+                                full_text = text_title + vig['dialogo'].upper()
+                                
+                                pdf.multi_cell(170, 6, full_text, border=1, align="L", fill=True)
+                                pdf.set_y(pdf.get_y() + 12) 
+                                
+                            except Exception as pdf_img_err:
+                                st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
+                    
+                    # Estrazione finale dei byte
+                    pdf_output = pdf.output()
+                
+                # Rilascio definitivo del pulsante di download
+                st.balloons()
+                st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
+                st.download_button(
+                    label="📥 SCARICA IL LIBRO IN PDF (PRONTO STAMPA)",
+                    data=pdf_output,
+                    file_name="mio_libro_a_fumetti.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
