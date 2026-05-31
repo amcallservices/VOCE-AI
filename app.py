@@ -127,6 +127,13 @@ trama = st.sidebar.text_area(
 
 generate_button = st.sidebar.button("⚡ CREA LIBRO ILLUSTRATO WORD")
 
+# Pulsante di emergenza per resettare i conflitti di memoria
+st.sidebar.markdown("---")
+if st.sidebar.button("🗑️ Svuota Memoria / Reset"):
+    st.session_state["vignette_generate"] = []
+    st.session_state["word_data"] = None
+    st.rerun()
+
 # --- LOGICA DI GENERAZIONE ---
 if generate_button:
     if not openai.api_key or not os.environ.get("REPLICATE_API_TOKEN"):
@@ -134,6 +141,7 @@ if generate_button:
     elif not trama.strip():
         st.warning("✍️ *Per favore, inserisci una trama prima di iniziare.*")
     else:
+        # Pulizia della sessione prima di iniziare una nuova opera pulita
         st.session_state["vignette_generate"] = []
         st.session_state["word_data"] = None
         
@@ -160,9 +168,9 @@ if generate_button:
                 st.sidebar.error(f"Errore coerenza: {e}")
                 personaggi_coerenza = ""
 
-        # FASE 2: Storyboard a blocchi (Chunking) con integrazione del Romanzo Testuale
+        # FASE 2: Storyboard a blocchi (Chunking) fino a 200 scene
         righe = []
-        vignette_per_blocco = 5 # Ridotto a 5 per blocco per dare a GPT lo spazio di scrivere storie testuali lunghe
+        vignette_per_blocco = 5 
         tot_blocchi = (num_vignette + vignette_per_blocco - 1) // vignette_per_blocco
         
         progress_bar = st.progress(0)
@@ -254,7 +262,7 @@ if generate_button:
                 except Exception as e:
                     st.error(f"Errore nella generazione della scena {i+1}: {e}")
 
-            # --- COMPILAZIONE FILE WORD (.DOCX) INPUT 6x9 POLLICI PER KDP CON ROMANZO + IMMAGINE ---
+            # --- COMPILAZIONE FILE WORD (.DOCX) 6x9 POLLICI PER KDP ---
             if st.session_state["vignette_generate"]:
                 with st.spinner("📝 Generazione del manoscritto Word 6\"x9\" (Testo + Illustrazioni)..."):
                     doc = Document()
@@ -269,7 +277,7 @@ if generate_button:
                         section.left_margin = Inches(0.76)
                         section.right_margin = Inches(0.76)
                     
-                    # Frontespizio / Copertina Interna
+                    # Frontespizio
                     doc.add_paragraph("\n\n\n")
                     title_p = doc.add_paragraph()
                     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -287,39 +295,37 @@ if generate_button:
                     
                     # Scrittura alternata (Pagina Testo -> Pagina Immagine)
                     for vig in st.session_state["vignette_generate"]:
-                        # 1. PAGINA DI SINISTRA: La Storia Testuale Romanzata
-                        p_story = doc.add_paragraph()
-                        p_story.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                        p_story.paragraph_format.line_spacing = 1.25
-                        p_story.paragraph_format.space_after = Pt(12)
-                        
-                        # Intestazione capitolo/scena
-                        run_chap = p_story.add_run(f"--- {vig['titolo'].upper()} ---\n\n")
-                        run_chap.font.name = 'Georgia'
-                        run_chap.font.size = Pt(12)
-                        run_chap.font.bold = True
-                        
-                        # Testo del racconto in prosa
-                        run_story = p_story.add_run(vig['storia'])
-                        run_story.font.name = 'Georgia'
-                        run_story.font.size = Pt(10.5)
-                        
-                        doc.add_page_break() # Saltiamo alla pagina successiva per inserire il disegno
+                        # 1. PAGINA DI SINISTRA: Storia Testuale Romanzata (Safe .get)
+                        storia_pulita = vig.get('storia', '')
+                        if storia_pulita:
+                            p_story = doc.add_paragraph()
+                            p_story.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                            p_story.paragraph_format.line_spacing = 1.25
+                            p_story.paragraph_format.space_after = Pt(12)
+                            
+                            run_chap = p_story.add_run(f"--- {vig['titolo'].upper()} ---\n\n")
+                            run_chap.font.name = 'Georgia'
+                            run_chap.font.size = Pt(12)
+                            run_chap.font.bold = True
+                            
+                            run_story = p_story.add_run(storia_pulita)
+                            run_story.font.name = 'Georgia'
+                            run_story.font.size = Pt(10.5)
+                            
+                            doc.add_page_break()
                         
                         # 2. PAGINA DI DESTRA: La Tavola Illustrata stile Manga
-                        if vig['png_bytes']:
+                        if vig.get('png_bytes'):
                             try:
                                 table = doc.add_table(rows=2, cols=1)
                                 table.autofit = False
                                 table.columns[0].width = Inches(4.48)
                                 
-                                # Inserimento Immagine
                                 cell_img = table.cell(0, 0)
                                 p_img = cell_img.paragraphs[0]
                                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(4.3))
                                 
-                                # Inserimento Box Nero con Didascalia
                                 cell_cap = table.cell(1, 0)
                                 shading_xml = parse_xml(r'<w:shd {} w:fill="000000"/>'.format(nsdecls('w')))
                                 cell_cap._tc.get_or_add_tcPr().append(shading_xml)
@@ -340,7 +346,7 @@ if generate_button:
                                 run_d.font.bold = True
                                 run_d.font.color.rgb = RGBColor(255, 255, 255)
                                 
-                                doc.add_page_break() # Fine blocco, si passa alla scena successiva
+                                doc.add_page_break()
                             except Exception as e:
                                 print(e)
                 
@@ -349,7 +355,7 @@ if generate_button:
                 word_buffer.seek(0)
                 st.session_state["word_data"] = word_buffer.getvalue()
 
-# --- RENDERING INTERFACCIA WEB ANTEPRIMA ---
+# --- RENDERING INTERFACCIA WEB ANTEPRIMA (SAFE CONTRO I KEYERROR) ---
 if st.session_state["vignette_generate"]:
     st.markdown("## 📖 ANTEPRIMA DEL LIBRO ILLUSTRATO")
     st.markdown("---")
@@ -360,9 +366,11 @@ if st.session_state["vignette_generate"]:
     for idx, vig in enumerate(st.session_state["vignette_generate"]):
         with cols[idx % col_count]:
             st.markdown(f"### 📄 {vig['titolo']}")
-            # Mostriamo il testo del romanzo sul web
-            st.markdown(f"<div class='comic-story-text'><b>Il Racconto:</b> {vig['storia']}</div>", unsafe_allow_html=True)
-            # Mostriamo la tavola grafica sul web
+            
+            # SAFE METHOD: Usiamo .get() per scongiurare KeyError se la sessione è sporca
+            storia_web = vig.get('storia', 'Nessun testo narrativo generato per questa scena.')
+            st.markdown(f"<div class='comic-story-text'><b>Il Racconto:</b> {storia_web}</div>", unsafe_allow_html=True)
+            
             st.markdown(f"""
             <div class="comic-panel-container">
                 <img class="comic-panel-img" src="{vig['url']}">
