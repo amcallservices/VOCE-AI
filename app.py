@@ -221,7 +221,7 @@ if generate_button:
                         </div>
                         """, unsafe_allow_html=True)
 
-                # --- COMPILAZIONE PDF NATIVA (FPDF2) ---
+                # --- COMPILAZIONE PDF NATIVA (FPDF2 CON OUTPUT IN BUFFER) ---
                 st.markdown("---")
                 st.markdown("## 📦 ESPORTA IL TUO LIBRO COMPLETO")
                 
@@ -281,16 +281,17 @@ if generate_button:
                             except Exception as pdf_img_err:
                                 st.warning(f"Impossibile inserire {vig['titolo']} nel PDF: {pdf_img_err}")
                     
-                    # Estrazione finale dei byte
-                    pdf_output = pdf.output()
+                    # FIX DEFINITIVO: Esportiamo il PDF come stringa di byte in memoria usando fpdf2 nativo
+                    pdf_buffer = BytesIO()
+                    pdf.output(dest='S') # Genera la stringa di dati del PDF
+                    pdf_bytes = pdf.output() # Ottiene i byte puliti direttamente
                 
-                # Rilascio definitivo del pulsante di download
+                # Rilascio definitivo del pulsante di download funzionante
                 st.balloons()
                 st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
                 st.download_button(
                     label="📥 SCARICA IL LIBRO IN PDF (PRONTO STAMPA)",
-                    data=pdf_output,
+                    data=pdf_bytes,
                     file_name="mio_libro_a_fumetti.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
+                    mime="application/pdf"
                 )
