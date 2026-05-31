@@ -97,12 +97,11 @@ else:
     os.environ["REPLICATE_API_TOKEN"] = os.getenv("REPLICATE_API_TOKEN")
 
 st.title("影🎨 Comic AI Creator & KDP Word Publisher")
-st.markdown("### Genera fino a 200 vignette con testo e immagini uniti nella stessa pagina KDP 6\"x9\"")
+st.markdown("### Genera fino a 200 vignette con testo e immagini MAXI unite nella stessa pagina KDP 6\"x9\"")
 
 # --- SIDEBAR (INPUT UTENTE) ---
 st.sidebar.header("📚 Configura il tuo Libro")
 
-# Nuova opzione per inserire il titolo del libro personalizzato
 titolo_libro = st.sidebar.text_input("Inserisci il Titolo del Libro:", placeholder="Es. L'Ombra del Destino")
 
 stile_fumetto = st.sidebar.selectbox(
@@ -146,7 +145,6 @@ if generate_button:
         st.session_state["vignette_generate"] = []
         st.session_state["word_data"] = None
         
-        # Validazione del titolo inserito
         titolo_finale_libro = titolo_libro.strip().upper() if titolo_libro.strip() else "IL MIO ROMANZO ILLUSTRATO"
         
         client = openai.OpenAI()
@@ -188,7 +186,7 @@ if generate_button:
                     system_prompt = (
                         f"Sei un autore di romanzi illustrati. Stai scrivendo un libro di {num_vignette} scene totali. "
                         f"Adesso devi scrivere ESATTAMENTE la porzione che va dalla scena {start_vig} alla scena {end_vig}.\n\n"
-                        "Per OGNI scena devi generare tassativamente 4 elementi separati dal carattere '|':\n"
+                        "Per OGNI scena devi generare tassativamente 4 elements separati dal carattere '|':\n"
                         "1. Il Titolo (es. VIGNETTA X)\n"
                         "2. La STORIA TESTUALE (Un paragrafo narrativo concentrato ed avvincente in prosa letteraria italiana, di circa 4-5 righe, da stampare sopra l'immagine).\n"
                         "3. La DIDASCALIA BREVE (In Italiano, tutto in maiuscolo, solenne, per il box nero sotto l'immagine).\n"
@@ -266,22 +264,22 @@ if generate_button:
                 except Exception as e:
                     st.error(f"Errore nella generazione della scena {i+1}: {e}")
 
-            # --- COMPILAZIONE FILE WORD (.DOCX) 6x9 POLLICI PER KDP ---
+            # --- COMPILAZIONE MANOSCRITTO WORD (.DOCX) 6x9 KDP CON IMMAGINI INGRANDITE ---
             if st.session_state["vignette_generate"]:
-                with st.spinner("📝 Generazione del manoscritto Word KDP Unificato..."):
+                with st.spinner("📝 Generazione del manoscritto Word KDP con tavole ingrandite..."):
                     doc = Document()
                     
-                    # Configurazione Layout 6x9 Amazon KDP
+                    # Configurazione Layout 6x9 Amazon KDP con margini ottimizzati a 0.5 pollici
                     sections = doc.sections
                     for section in sections:
                         section.page_width = Inches(6.0)
                         section.page_height = Inches(9.0)
-                        section.top_margin = Inches(0.76)
-                        section.bottom_margin = Inches(0.76)
-                        section.left_margin = Inches(0.76)
-                        section.right_margin = Inches(0.76)
+                        section.top_margin = Inches(0.6)
+                        section.bottom_margin = Inches(0.6)
+                        section.left_margin = Inches(0.5)   # Allargato lo spazio interno utile
+                        section.right_margin = Inches(0.5)  # Allargato lo spazio esterno utile
                     
-                    # Frontespizio / Copertina Interna Pulita: Solo il Titolo Utente
+                    # Frontespizio / Copertina Interna
                     doc.add_paragraph("\n\n\n\n\n")
                     title_p = doc.add_paragraph()
                     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -292,14 +290,14 @@ if generate_button:
                     
                     doc.add_page_break()
                     
-                    # Costruzione delle pagine unificate (Testo + Immagine)
+                    # Costruzione delle pagine unificate (Testo + Immagine MAXI)
                     for idx, vig in enumerate(st.session_state["vignette_generate"]):
                         # 1. PARTE SUPERIORE DELLA PAGINA: Storia Testuale Romanzata
                         storia_pulita = vig.get('storia', '')
                         p_story = doc.add_paragraph()
                         p_story.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                         p_story.paragraph_format.line_spacing = 1.15
-                        p_story.paragraph_format.space_after = Pt(8)
+                        p_story.paragraph_format.space_after = Pt(6)
                         
                         # Titolo della singola scena
                         run_chap = p_story.add_run(f"--- {vig['titolo'].upper()} ---\n")
@@ -312,48 +310,49 @@ if generate_button:
                         run_story.font.name = 'Georgia'
                         run_story.font.size = Pt(9.5)
                         
-                        # Spazio vuoto prima del disegno
+                        # Spazio di stacco ridotto per accogliere l'immagine più grande
                         p_space = doc.add_paragraph()
-                        p_space.paragraph_format.space_after = Pt(6)
+                        p_space.paragraph_format.space_after = Pt(4)
                         
-                        # 2. PARTE INFERIORE DELLA PAGINA: La Tavola Grafica (Immagine Compatta + Box Nero)
+                        # 2. PARTE INFERIORE DELLA PAGINA: Tavola Grafica Ingrandita (Larghezza utile totale: 5.0 pollici)
                         if vig.get('png_bytes'):
                             try:
                                 table = doc.add_table(rows=2, cols=1)
                                 table.autofit = False
-                                table.columns[0].width = Inches(4.48)
+                                # Tabella estesa al massimo dei nuovi margini (5.0 pollici complessivi)
+                                table.columns[0].width = Inches(5.0)
                                 
-                                # Inserimento Immagine (ridimensionata per la pagina unificata)
+                                # Cella 1: Immagine Ingrandita (portata a 4.8 pollici di larghezza!)
                                 cell_img = table.cell(0, 0)
                                 p_img = cell_img.paragraphs[0]
                                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(3.3))
+                                p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(4.8))
                                 
-                                # Inserimento Box Nero con Didascalia sotto l'immagine
+                                # Cella 2: Box Nero con Didascalia esteso a 5.0 pollici
                                 cell_cap = table.cell(1, 0)
                                 shading_xml = parse_xml(r'<w:shd {} w:fill="000000"/>'.format(nsdecls('w')))
                                 cell_cap._tc.get_or_add_tcPr().append(shading_xml)
                                 
                                 p_cap = cell_cap.paragraphs[0]
-                                p_cap.paragraph_format.left_indent = Inches(0.1)
-                                p_cap.paragraph_format.right_indent = Inches(0.1)
+                                p_cap.paragraph_format.left_indent = Inches(0.15)
+                                p_cap.paragraph_format.right_indent = Inches(0.15)
                                 
                                 run_t = p_cap.add_run(f"{vig['titolo'].upper()} - ")
                                 run_t.font.name = 'Courier New'
-                                run_t.font.size = Pt(9)
+                                run_t.font.size = Pt(9.5)
                                 run_t.font.bold = True
                                 run_t.font.color.rgb = RGBColor(69, 243, 255) # Ciano
                                 
                                 run_d = p_cap.add_run(vig['dialogo'].upper())
                                 run_d.font.name = 'Courier New'
-                                run_d.font.size = Pt(9)
+                                run_d.font.size = Pt(9.5)
                                 run_d.font.bold = True
                                 run_d.font.color.rgb = RGBColor(255, 255, 255) # Bianco
                                 
                             except Exception as e:
                                 print(e)
                         
-                        # FIX DEFINITIVO PAGINA VUOTA: Inserisce l'interruzione SOLO se NON siamo all'ultima pagina
+                        # Inserisce l'interruzione di pagina solo se non siamo all'ultima pagina (niente fogli vuoti alla fine)
                         if idx < len(st.session_state["vignette_generate"]) - 1:
                             doc.add_page_break()
                 
@@ -389,11 +388,11 @@ if st.session_state["vignette_generate"]:
     st.markdown("## 📦 AREA EXPORT KDP AMAZON")
     
     if st.session_state["word_data"]:
-        st.success("🎉 Libro generato! Ogni pagina del file Word contiene la storia testuale e la tavola illustrata unite in formato 6\"x9\" (senza pagine vuote finali).")
+        st.success("🎉 Libro generato! Ogni pagina del file Word contiene ora la storia testuale e l'illustrazione in formato MAXI (6\"x9\").")
         st.download_button(
-            label="📥 DOWNLOAD LIBRO UNIFICATO (STORIA + ILLUSTRAZIONI UNITE IN WORD 6x9)",
+            label="📥 DOWNLOAD LIBRO UNIFICATO (STORIA + ILLUSTRAZIONI INGRANDITE IN WORD 6x9)",
             data=st.session_state["word_data"],
-            file_name="romanzo_illustrato_unificato_6x9.docx",
+            file_name="romanzo_illustrato_maxi_6x9.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True
         )
