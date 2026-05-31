@@ -58,7 +58,7 @@ if generate_button:
                 character_prompt = (
                     "Analizza la seguente trama e identifica i personaggi principali. "
                     "Crea una descrizione fisica dettagliata in INGLESE per ognuno di essi (es. genere, età apparente, vestiti fissi, capelli, espressione tipica). "
-                    "Queste descrizioni verranno usate come prompt per un'IA generativa di immagini, quindi sii visivo, chiaro e conciso. "
+                    "Queste descrizioni verranno usate como prompt per un'IA generativa di immagini, quindi sii visivo, chiaro e conciso. "
                     "Rispondi SOLTANTO con le descrizioni dei personaggi accumulate in un unico paragrafo compatto."
                 )
                 
@@ -73,7 +73,7 @@ if generate_button:
                 personaggi_coerenza = char_response.choices[0].message.content
                 st.sidebar.success("✅ Coerenza Personaggi Attivata!")
                 with st.sidebar.expander("Visualizza Modello Personaggi (AI)"):
-                    st.write(personaggi_coherence = personaggi_coerenza)
+                    st.write(personaggi_coerenza)
                     
             except Exception as e:
                 st.error(f"Errore nella generazione dei personaggi: {e}")
@@ -143,7 +143,13 @@ if generate_button:
                             }
                         )
                         
-                        image_url = output[0]
+                        # FIX: Gestione del nuovo formato FileOutput / Liste di Replicate
+                        # Se è una lista di oggetti FileOutput, prendiamo il primo e lo convertiamo in stringa (URL)
+                        if isinstance(output, list):
+                            image_url = str(output[0])
+                        else:
+                            image_url = str(output)
+                        
                         st.image(image_url, caption=f"{titolo_vignetta} - {dialogo}", use_container_width=True)
                         st.markdown("---")
                         
