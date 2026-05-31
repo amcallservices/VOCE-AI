@@ -4,3 +4,4 @@ requests
 openai
 python-docx
 PyPDF2
+replicate
