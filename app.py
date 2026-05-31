@@ -124,7 +124,7 @@ if generate_button:
         with st.spinner("🧠 Analisi della trama e strutturazione dei personaggi..."):
             try:
                 character_prompt = (
-                    "Analizza la seguente trama e identifica i personaggi principali. "
+                    "Analizza la McKinley trama e identifica i personaggi principali. "
                     "Crea una descrizione fisica molto dettagliata in INGLESE per ognuno di essi. "
                     "Rispondi SOLTANTO con le descrizioni dei personaggi accumulate in un unico paragrafo compatto."
                 )
@@ -146,7 +146,7 @@ if generate_button:
         with st.spinner(f"📖 Scrittura della sceneggiatura cinematografica ({num_vignette} vignette)..."):
             try:
                 system_prompt = (
-                    "Sei un expert sceneggiatore di fumetti e manga dark. Suddividi la trama dell'utente "
+                    "Sei un esperto sceneggiatore di fumetti e manga dark. Suddividi la trama dell'utente "
                     f"in esattamente {num_vignette} vignette sequenziali per comporre un capitolo/libro completo.\n\n"
                     "Rispondi formattando l'output esattamente in questo modo per ogni riga, separando i campi con '|':\n"
                     "Titolo Vignetta | Testo Didascalia Fumetto (In Italiano, stile solenne e maiuscolo) | Prompt d'azione per l'immagine (In Inglese)\n"
@@ -229,9 +229,9 @@ if generate_button:
                     pdf = ComicPDF(orientation="P", unit="mm", format="A4")
                     pdf.set_auto_page_break(auto=True, margin=15)
                     
-                    # 1. PAGINA DI COPERTINA SCOLO COERENTE (SFONDO NERO)
+                    # 1. PAGINA DI COPERTINA CON SFONDO SCURO
                     pdf.add_page()
-                    pdf.set_fill_color(13, 15, 18) # Sfondo scuro dell'app
+                    pdf.set_fill_color(13, 15, 18) # Sfondo scuro coerente
                     pdf.rect(0, 0, 210, 297, "F")
                     
                     pdf.set_y(100)
@@ -243,9 +243,8 @@ if generate_button:
                     pdf.set_text_color(150, 150, 150)
                     pdf.cell(0, 10, "A Comic AI Generated Book", align="C", ln=True)
                     
-                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina per la massima resa grafica)
+                    # 2. INSERIMENTO DELLE VIGNETTE (Massimo 2 per pagina per una resa fumettistica ottimale)
                     for idx, vig in enumerate(vignette_renderizzate):
-                        # Aggiungiamo una nuova pagina ogni 2 vignette per non affollare la stampa
                         if idx % 2 == 0:
                             pdf.add_page()
                             pdf.set_fill_color(13, 15, 18)
@@ -254,46 +253,7 @@ if generate_button:
                         
                         if vig['bytes']:
                             try:
-                                # Reset del buffer di memoria dell'immagine
+                                # Reset del buffer dell'immagine
                                 vig['bytes'].seek(0)
                                 
-                                # Disegno dell'immagine (Larghezza standard 170mm, centrata su A4)
-                                current_y = pdf.get_y()
-                                pdf.image(vig['bytes'], x=20, y=current_y, w=170)
-                                
-                                # Calcolo altezza proporzionale dell'immagine (aspetto 4:3) -> h = (170 * 3) / 4 = 127.5mm
-                                pdf.set_y(current_y + 127.5)
-                                
-                                # Riquadro di testo Didascalia (Sfondo Nero)
-                                pdf.set_fill_color(0, 0, 0)
-                                pdf.set_draw_color(31, 40, 51)
-                                pdf.set_line_width(0.8)
-                                
-                                # Calcoliamo quante righe occupa il testo per fare il box corretto
-                                pdf.set_font("courier", "B", 10)
-                                pdf.set_text_color(69, 243, 255) # Colore ciano per il titolo della vignetta
-                                text_title = f"{vig['titolo']} - "
-                                
-                                pdf.set_text_color(255, 255, 255) # Testo bianco
-                                full_text = text_title + vig['dialogo'].upper()
-                                
-                                # Stampiamo il blocco con lo sfondo nero attivato (ln=True ci sposta sotto per la vignetta successiva)
-                                pdf.multi_cell(170, 6, full_text, border=1, align="L", fill=True)
-                                pdf.set_y(pdf.get_y() + 12) # Spazio di distanziamento per la seconda vignetta della pagina
-                                
-                            except Exception as pdf_img_err:
-                                print(f"Errore inserimento immagine PDF: {pdf_img_err}")
-                    
-                    # Generazione dei byte del PDF direttamente in memoria
-                    pdf_output = pdf.output()
-                
-                # Rilascio del pulsante di download
-                st.balloons()
-                st.success("🎉 Il tuo libro a fumetti è stato impaginato ed è pronto al download!")
-                st.download_button(
-                    label="📥 SCARICA IL LIBRO IN PDF (PRONTO STAMPA)",
-                    data=bytes(pdf_output),
-                    file_name="mio_libro_a_fumetti.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
+                                # Disegno dell'immagine (
