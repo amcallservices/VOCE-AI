@@ -43,6 +43,14 @@ st.markdown("""
         display: block;
         height: auto;
     }
+    .comic-story-text {
+        background-color: #161920;
+        border-left: 4px solid #45f3ff;
+        padding: 15px;
+        margin-bottom: 20px;
+        font-style: italic;
+        border-radius: 0 4px 4px 0;
+    }
     .comic-caption-box {
         background-color: rgba(0, 0, 0, 0.9);
         color: #ffffff;
@@ -89,7 +97,7 @@ else:
     os.environ["REPLICATE_API_TOKEN"] = os.getenv("REPLICATE_API_TOKEN")
 
 st.title("影🎨 Comic AI Creator & KDP Word Publisher")
-st.markdown("### Genera fino a 200 vignette e scarica il tuo libro Word pronto nel formato KDP 6\"x9\"")
+st.markdown("### Genera fino a 200 vignette con testo narrativo integrato in formato KDP 6\"x9\"")
 
 # --- SIDEBAR (INPUT UTENTE) ---
 st.sidebar.header("📚 Configura il tuo Libro")
@@ -104,11 +112,11 @@ stile_fumetto = st.sidebar.selectbox(
     ]
 )
 
-num_vignette = st.sidebar.slider("Numero di vignette totali", min_value=2, max_value=200, value=6, step=1)
+num_vignette = st.sidebar.slider("Numero di vignette/capitoli", min_value=2, max_value=200, value=4, step=1)
 
 layout_scelta = st.sidebar.selectbox(
     "Struttura anteprima web (Layout):",
-    ["Griglia a 2 Colonne (Consigliata)", "Lista Singola Verticale (Grande)", "Griglia a 3 Colonne (Compatta)"]
+    ["Lista Singola Verticale (Grande)", "Griglia a 2 Colonne (Consigliata)", "Griglia a 3 Colonne (Compatta)"]
 )
 
 trama = st.sidebar.text_area(
@@ -117,7 +125,7 @@ trama = st.sidebar.text_area(
     height=150
 )
 
-generate_button = st.sidebar.button("⚡ CREA E FORMATTA LIBRO WORD")
+generate_button = st.sidebar.button("⚡ CREA LIBRO ILLUSTRATO WORD")
 
 # --- LOGICA DI GENERAZIONE ---
 if generate_button:
@@ -126,7 +134,6 @@ if generate_button:
     elif not trama.strip():
         st.warning("✍️ *Per favore, inserisci una trama prima di iniziare.*")
     else:
-        # Resettiamo la memoria precedente per una nuova generazione
         st.session_state["vignette_generate"] = []
         st.session_state["word_data"] = None
         
@@ -153,9 +160,9 @@ if generate_button:
                 st.sidebar.error(f"Errore coerenza: {e}")
                 personaggi_coerenza = ""
 
-        # FASE 2: Storyboard a blocchi (Chunking) fino a 200 vignette
+        # FASE 2: Storyboard a blocchi (Chunking) con integrazione del Romanzo Testuale
         righe = []
-        vignette_per_blocco = 10
+        vignette_per_blocco = 5 # Ridotto a 5 per blocco per dare a GPT lo spazio di scrivere storie testuali lunghe
         tot_blocchi = (num_vignette + vignette_per_blocco - 1) // vignette_per_blocco
         
         progress_bar = st.progress(0)
@@ -164,29 +171,33 @@ if generate_button:
             start_vig = (blocco * vignette_per_blocco) + 1
             end_vig = min((blocco + 1) * vignette_per_blocco, num_vignette)
             
-            with st.spinner(f"📝 Generazione sceneggiatura: Vignette da {start_vig} a {end_vig}..."):
+            with st.spinner(f"📝 Generazione narrativa e prompt: Scene {start_vig} a {end_vig}..."):
                 try:
                     system_prompt = (
-                        f"Sei un esperto sceneggiatore di fumetti. Stai scrivendo un libro di {num_vignette} vignette totali. "
-                        f"Adesso devi scrivere ESATTAMENTE la porzione che va dalla vignetta {start_vig} alla vignetta {end_vig}. "
-                        "Mantieni la massima continuità logica con i blocchi precedenti.\n\n"
-                        "Rispondi formattando l'output rigidamente in questo modo per ogni riga, separando i campi unicamente con '|':\n"
-                        "VIGNETTA X | Testo Didascalia Fumetto (In Italiano, maiuscolo, solenne) | Prompt d'azione per l'immagine (In Inglese)\n"
-                        "Non includere introduzioni, note o markdown extra."
+                        f"Sei un autore di romanzi illustrati e fumetti d'autore. Stai scrivendo un libro di {num_vignette} scene totali. "
+                        f"Adesso devi scrivere ESATTAMENTE la porzione che va dalla scena {start_vig} alla scena {end_vig}.\n\n"
+                        "Per OGNI scena devi generare tassativamente 4 elementi separati dal carattere '|':\n"
+                        "1. Il Titolo (es. VIGNETTA X)\n"
+                        "2. La STORIA TESTUALE (Un paragrafo narrativo lungo ed esteso in prosa letteraria italiana, avvincente e descrittivo, da leggere come un libro vero).\n"
+                        "3. La DIDASCALIA BREVE (In Italiano, tutto in maiuscolo, solenne, per il box nero sotto l'immagine).\n"
+                        "4. Il PROMPT D'AZIONE (In Inglese, dettagliato, focalizzato su un singolo riquadro visivo senza scritte).\n\n"
+                        "Rispondi formattando l'output rigidamente in questo modo per ogni riga (una riga per scena):\n"
+                        "Titolo | Storia Testuale Romanzata | Didascalia Fumetto | Prompt per l'immagine\n"
+                        "Non includere introduzioni, note o markdown extra. Usa solo il divisore '|'."
                     )
                     
                     response = client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": f"Trama generale del libro: {trama}. Contesto righe precedenti: {str(righe[-3:]) if len(righe)>0 else 'Inizio'}"}
+                            {"role": "user", "content": f"Trama generale del libro: {trama}. Record storico righe precedenti: {str(righe[-2:]) if len(righe)>0 else 'Inizio'}"}
                         ],
                         temperature=0.7
                     )
                     
                     for line in response.choices[0].message.content.split("\n"):
                         line = line.strip()
-                        if "|" in line and "titolo" not in line.lower() and len(line.split("|")) >= 3:
+                        if "|" in line and "titolo" not in line.lower() and len(line.split("|")) >= 4:
                             righe.append(line)
                             
                 except Exception as e:
@@ -196,7 +207,7 @@ if generate_button:
 
         # FASE 3: Generazione immagini interamente in RAM
         if righe:
-            st.success(f"📝 Sceneggiatura di {len(righe)} vignette pronta! Avvio disegno dei pannelli...")
+            st.success(f"📝 Sceneggiatura ed elementi testuali di {len(righe)} scene pronti! Avvio pittura digitale...")
             
             for i, riga in enumerate(righe):
                 if i >= num_vignette:
@@ -204,10 +215,11 @@ if generate_button:
                 try:
                     parti = riga.split("|")
                     titolo_vignetta = parti[0].strip()
-                    dialogo = parti[1].strip()
-                    action_prompt = parti[2].strip()
+                    storia_testo = parti[1].strip()
+                    dialogo = parti[2].strip()
+                    action_prompt = parti[3].strip()
                     
-                    with st.spinner(f"🎨 Generazione {titolo_vignetta} di {num_vignette}..."):
+                    with st.spinner(f"🎨 Disegno ed impaginazione di {titolo_vignetta}..."):
                         prompt_finale = (
                             f"A single, isolated comic book panel, {stile_fumetto}, masterwork. "
                             f"Scene: {action_prompt}. Character visual guidelines: {personaggi_coerenza}. "
@@ -225,7 +237,6 @@ if generate_button:
                             ram_buffer_png = BytesIO(img_response.content)
                             image_webp = Image.open(ram_buffer_png)
                             
-                            # Convertiamo e salviamo in RAM come byte PNG
                             out_png_buffer = BytesIO()
                             image_webp.save(out_png_buffer, "PNG")
                             out_png_buffer.seek(0)
@@ -235,62 +246,80 @@ if generate_button:
                         
                         st.session_state["vignette_generate"].append({
                             "titolo": titolo_vignetta,
+                            "storia": storia_testo,
                             "dialogo": dialogo,
                             "url": image_url,
                             "png_bytes": png_bytes
                         })
                 except Exception as e:
-                    st.error(f"Errore nella generazione della vignetta {i+1}: {e}")
+                    st.error(f"Errore nella generazione della scena {i+1}: {e}")
 
-            # --- COMPILAZIONE FILE WORD (.DOCX) IN RAM CONFIGURATO IN 6x9 POLLICI PER AMAZON KDP ---
+            # --- COMPILAZIONE FILE WORD (.DOCX) INPUT 6x9 POLLICI PER KDP CON ROMANZO + IMMAGINE ---
             if st.session_state["vignette_generate"]:
-                with st.spinner("📝 Compilazione e formattazione del file Word 6\"x9\" per KDP..."):
+                with st.spinner("📝 Generazione del manoscritto Word 6\"x9\" (Testo + Illustrazioni)..."):
                     doc = Document()
                     
-                    # 1. Configurazione Dimensioni Pagina 6x9 pollici ed impostazione margini di taglio (Bleed)
+                    # Configurazione Layout 6x9 Amazon KDP
                     sections = doc.sections
                     for section in sections:
-                        section.page_width = Inches(6.0)     # Larghezza KDP Standard
-                        section.page_height = Inches(9.0)    # Altezza KDP Standard
-                        section.top_margin = Inches(0.76)    # Margine di sicurezza superiore
-                        section.bottom_margin = Inches(0.76) # Margine di sicurezza inferiore
-                        section.left_margin = Inches(0.76)   # Margine interno (Gutter/Rilegatura sicuro)
-                        section.right_margin = Inches(0.76)  # Margine esterno
+                        section.page_width = Inches(6.0)
+                        section.page_height = Inches(9.0)
+                        section.top_margin = Inches(0.76)
+                        section.bottom_margin = Inches(0.76)
+                        section.left_margin = Inches(0.76)
+                        section.right_margin = Inches(0.76)
                     
-                    # 2. Pagina di Copertina Interna del Libro Word
+                    # Frontespizio / Copertina Interna
+                    doc.add_paragraph("\n\n\n")
                     title_p = doc.add_paragraph()
                     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    doc.add_paragraph("\n\n\n") # Spaziatura verticale per centrare il titolo
-                    
                     title_run = title_p.add_run("SHADOW REQUIEM\n\n")
                     title_run.font.name = 'Courier New'
                     title_run.font.size = Pt(28)
                     title_run.font.bold = True
                     
-                    sub_run = title_p.add_run("Volume a Fumetti\nEdito con AI Creator")
+                    sub_run = title_p.add_run("Romanzo Illustrato ad Alta Coerenza\nFormato Editoriale KDP")
                     sub_run.font.name = 'Courier New'
-                    sub_run.font.size = Pt(12)
+                    sub_run.font.size = Pt(11)
                     sub_run.italic = True
                     
                     doc.add_page_break()
                     
-                    # 3. Inserimento Tavole (1 Vignetta per pagina in formato 6x9)
+                    # Scrittura alternata (Pagina Testo -> Pagina Immagine)
                     for vig in st.session_state["vignette_generate"]:
+                        # 1. PAGINA DI SINISTRA: La Storia Testuale Romanzata
+                        p_story = doc.add_paragraph()
+                        p_story.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                        p_story.paragraph_format.line_spacing = 1.25
+                        p_story.paragraph_format.space_after = Pt(12)
+                        
+                        # Intestazione capitolo/scena
+                        run_chap = p_story.add_run(f"--- {vig['titolo'].upper()} ---\n\n")
+                        run_chap.font.name = 'Georgia'
+                        run_chap.font.size = Pt(12)
+                        run_chap.font.bold = True
+                        
+                        # Testo del racconto in prosa
+                        run_story = p_story.add_run(vig['storia'])
+                        run_story.font.name = 'Georgia'
+                        run_story.font.size = Pt(10.5)
+                        
+                        doc.add_page_break() # Saltiamo alla pagina successiva per inserire il disegno
+                        
+                        # 2. PAGINA DI DESTRA: La Tavola Illustrata stile Manga
                         if vig['png_bytes']:
                             try:
-                                # Creiamo la griglia-tabella a cella singola per mantenere l'estetica fumetto
                                 table = doc.add_table(rows=2, cols=1)
                                 table.autofit = False
-                                # La larghezza utile della cella calcolata sui margini (6.0 - 0.76 - 0.76 = 4.48 pollici)
                                 table.columns[0].width = Inches(4.48)
                                 
-                                # Cella 1: Immagine Vignetta adattata proporzionalmente al formato 6x9
+                                # Inserimento Immagine
                                 cell_img = table.cell(0, 0)
                                 p_img = cell_img.paragraphs[0]
                                 p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 p_img.add_run().add_picture(BytesIO(vig['png_bytes']), width=Inches(4.3))
                                 
-                                # Cella 2: Didascalia Fumetto (Sfondo Nero, Testo Bianco Monospace)
+                                # Inserimento Box Nero con Didascalia
                                 cell_cap = table.cell(1, 0)
                                 shading_xml = parse_xml(r'<w:shd {} w:fill="000000"/>'.format(nsdecls('w')))
                                 cell_cap._tc.get_or_add_tcPr().append(shading_xml)
@@ -299,31 +328,30 @@ if generate_button:
                                 p_cap.paragraph_format.left_indent = Inches(0.1)
                                 p_cap.paragraph_format.right_indent = Inches(0.1)
                                 
-                                run_title = p_cap.add_run(f"{vig['titolo'].upper()} - ")
-                                run_title.font.name = 'Courier New'
-                                run_title.font.size = Pt(9.5)
-                                run_title.font.bold = True
-                                run_title.font.color.rgb = RGBColor(69, 243, 255) # Colore Ciano
+                                run_t = p_cap.add_run(f"{vig['titolo'].upper()} - ")
+                                run_t.font.name = 'Courier New'
+                                run_t.font.size = Pt(9.5)
+                                run_t.font.bold = True
+                                run_t.font.color.rgb = RGBColor(69, 243, 255)
                                 
-                                run_text = p_cap.add_run(vig['dialogo'].upper())
-                                run_text.font.name = 'Courier New'
-                                run_text.font.size = Pt(9.5)
-                                run_text.font.bold = True
-                                run_text.font.color.rgb = RGBColor(255, 255, 255) # Testo Bianco
+                                run_d = p_cap.add_run(vig['dialogo'].upper())
+                                run_d.font.name = 'Courier New'
+                                run_d.font.size = Pt(9.5)
+                                run_d.font.bold = True
+                                run_d.font.color.rgb = RGBColor(255, 255, 255)
                                 
-                                # Forza l'interruzione di pagina: ogni vignetta occupa una pagina KDP pulita ed indipendente
-                                doc.add_page_break()
+                                doc.add_page_break() # Fine blocco, si passa alla scena successiva
                             except Exception as e:
-                                print(f"Errore KDP Word: {e}")
+                                print(e)
                 
                 word_buffer = BytesIO()
                 doc.save(word_buffer)
                 word_buffer.seek(0)
                 st.session_state["word_data"] = word_buffer.getvalue()
 
-# --- RENDERING ANTEPRIMA (FUORI DALL'IF GENERATE_BUTTON PER MANTENERE I DATI ATTIVI) ---
+# --- RENDERING INTERFACCIA WEB ANTEPRIMA ---
 if st.session_state["vignette_generate"]:
-    st.markdown("## 📖 ANTEPRIMA DEL LIBRO A FUMETTI")
+    st.markdown("## 📖 ANTEPRIMA DEL LIBRO ILLUSTRATO")
     st.markdown("---")
     
     col_count = 3 if layout_scelta == "Griglia a 3 Colonne (Compatta)" else (2 if layout_scelta == "Griglia a 2 Colonne (Consigliata)" else 1)
@@ -331,24 +359,27 @@ if st.session_state["vignette_generate"]:
     
     for idx, vig in enumerate(st.session_state["vignette_generate"]):
         with cols[idx % col_count]:
+            st.markdown(f"### 📄 {vig['titolo']}")
+            # Mostriamo il testo del romanzo sul web
+            st.markdown(f"<div class='comic-story-text'><b>Il Racconto:</b> {vig['storia']}</div>", unsafe_allow_html=True)
+            # Mostriamo la tavola grafica sul web
             st.markdown(f"""
             <div class="comic-panel-container">
-                <div class="comic-overlay-caption">{vig['titolo']}</div>
                 <img class="comic-panel-img" src="{vig['url']}">
                 <div class="comic-caption-box">{vig['dialogo']}</div>
             </div>
             """, unsafe_allow_html=True)
 
-    # --- AREA EXPORT UNICA E BLOCCATA IN BASSO ---
+    # --- AREA EXPORT KDP ---
     st.markdown("---")
     st.markdown("## 📦 AREA EXPORT KDP AMAZON")
     
     if st.session_state["word_data"]:
-        st.success(f"🎉 Elaborazione completata con successo! Il tuo file Microsoft Word è pronto.")
+        st.success("🎉 Libro generato! Il file Word contiene la storia testuale combinata alle immagini in pagine alternate 6\"x9\".")
         st.download_button(
-            label="📥 DOWNLOAD LIBRO FUMETTI IN WORD (.DOCX FORMATTATO 6x9 PER KDP)",
+            label="📥 DOWNLOAD LIBRO COMPLETO (STORIA + ILLUSTRAZIONI IN WORD 6x9 PER KDP)",
             data=st.session_state["word_data"],
-            file_name="mio_libro_kdp_6x9.docx",
+            file_name="romanzo_illustrato_kdp_6x9.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True
         )
